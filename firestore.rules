@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function requesterRole() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      ).data.role;
+    }
+
+    function isStaff() {
+      return isSignedIn() && requesterRole() == "staff";
+    }
+
+    // User profiles
+    match /users/{uid} {
+      allow read, create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    // Personal subject collections
+    match /users/{uid}/subjects/{subjectId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/subjects/{subjectId}/attendance/{attendanceId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+
+    // Staff-managed classes and nested data
+    match /users/{uid}/classes/{classId} {
+      allow read, create, update, delete: if isOwner(uid) && isStaff();
+    }
+
+    match /users/{uid}/classes/{classId}/students/{studentId} {
+      allow read, create, update, delete: if isOwner(uid) && isStaff();
+    }
+
+    match /users/{uid}/classes/{classId}/schedules/{scheduleId} {
+      allow read, create, update, delete: if isOwner(uid) && isStaff();
+    }
+
+    // Staff global subjects directory (search/join flow)
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isStaff();
+    }
+
+    // Join requests: students create; owner staff reads/updates.
+    match /joinRequests/{requestId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.studentId == request.auth.uid;
+
+      allow read: if isSignedIn() && (
+        resource.data.studentId == request.auth.uid ||
+        resource.data.ownerId == request.auth.uid
+      );
+
+      allow update: if isSignedIn() &&
+        resource.data.ownerId == request.auth.uid;
+
+      allow delete: if false;
+    }
+
+    // Attendance verification requests
+    match /attendanceRequests/{requestId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.studentId == request.auth.uid;
+
+      allow read: if isSignedIn() && (
+        resource.data.studentId == request.auth.uid ||
+        resource.data.staffId == request.auth.uid
+      );
+
+      allow update: if isSignedIn() &&
+        resource.data.staffId == request.auth.uid;
+
+      allow delete: if false;
+    }
+
+    // Lock down everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

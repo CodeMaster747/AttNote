@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "attnote-dev",
+    "staging": "attnote-staging",
+    "production": "attnote-prod"
+  }
+}

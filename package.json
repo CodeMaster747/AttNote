@@ -1,0 +1,13 @@
+{
+  "name": "attnote-security-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Firestore rules tests for AttNote",
+  "scripts": {
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore.rules.test.js\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase-tools": "^13.31.2"
+  }
+}

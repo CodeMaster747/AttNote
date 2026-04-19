@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "655558333883",
+    "project_id": "attnote-dd1f2",
+    "storage_bucket": "attnote-dd1f2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:655558333883:android:2b136f9b0a1bbb0373609e",
+        "android_client_info": {
+          "package_name": "com.example.attnote"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "655558333883-pk3la5chj8nk1q4b9smdvhk0fu8rmgp0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtZcM4bhMuXrtEhCOjQUKn-6rUjkm2FBw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "655558333883-pk3la5chj8nk1q4b9smdvhk0fu8rmgp0.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "655558333883-gp8n7fccdt9867noia8kul3meicuqrju.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.attnote"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
