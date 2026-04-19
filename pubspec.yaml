@@ -42,7 +42,7 @@ dependencies:
   intl: ^0.18.1
   http: ^1.1.2
   record: ^6.1.2
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.5.5
   # just_audio: ^0.9.36
   path: ^1.8.3
   fl_chart: ^0.68.0  # Free charting library for analytics
