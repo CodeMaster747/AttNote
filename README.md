@@ -31,3 +31,4 @@ Run security rule tests:
 npm ci
 npm run test:rules
 ```
+trigger checks
