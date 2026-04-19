@@ -32,3 +32,4 @@ npm ci
 npm run test:rules
 ```
 trigger checks
+staging trigger
