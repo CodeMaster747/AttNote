@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
-      # Manual "Run workflow" defaults to the default branch (`main`), which may not
-      # include Hosting config yet; staging deploys should use `develop`.
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -26,10 +24,8 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Setup Firebase CLI and FlutterFire CLI
-        run: |
-          npm install -g firebase-tools
-          dart pub global activate flutterfire_cli
+      - name: Setup Firebase CLI
+        run: npm install -g firebase-tools
 
       - name: Setup service account credentials
         env:
@@ -40,24 +36,101 @@ jobs:
             exit 1
           fi
           echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
 
       - name: Configure Firebase for staging
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
-          flutterfire configure \
-            --project=${{ vars.FIREBASE_STAGING_PROJECT_ID }} \
-            --platforms=web,android \
-            --yes \
-            --out=lib/firebase_options.dart
+          firebase use ${{ vars.FIREBASE_STAGING_PROJECT_ID }}
+          
+          # Get Firebase web config
+          firebase apps:sdkconfig WEB --project=${{ vars.FIREBASE_STAGING_PROJECT_ID }} > firebase-config.json
+          
+          # Use Python to generate firebase_options.dart
+          python3 << 'EOF'
+import json
 
-      - name: Extract and update OAuth Client ID
-        run: bash scripts/update_google_oauth_client_id.sh
+with open('firebase-config.json', 'r') as f:
+    config = json.load(f)
+
+api_key = config.get('apiKey', '')
+app_id = config.get('appId', '')
+messaging_sender_id = config.get('messagingSenderId', '')
+project_id = config.get('projectId', '')
+auth_domain = config.get('authDomain', '')
+storage_bucket = config.get('storageBucket', '')
+measurement_id = config.get('measurementId', '')
+
+dart_code = f"""// File generated for Firebase project: {project_id}
+// ignore_for_file: type=lint
+import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+
+/// Default [FirebaseOptions] for use with your Firebase apps.
+class DefaultFirebaseOptions {{
+  static FirebaseOptions get currentPlatform {{
+    if (kIsWeb) {{
+      return web;
+    }}
+    switch (defaultTargetPlatform) {{
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+        throw UnsupportedError(
+          'DefaultFirebaseOptions have not been configured for this platform - '
+          'you can reconfigure this by running the FlutterFire CLI again.',
+        );
+      default:
+        throw UnsupportedError(
+          'DefaultFirebaseOptions are not supported for this platform.',
+        );
+    }}
+  }}
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: '{api_key}',
+    appId: '{app_id}',
+    messagingSenderId: '{messaging_sender_id}',
+    projectId: '{project_id}',
+    authDomain: '{auth_domain}',
+    storageBucket: '{storage_bucket}',"""
+
+if measurement_id:
+    dart_code += f"\n    measurementId: '{measurement_id}',"
+
+dart_code += """
+  );
+}
+"""
+
+with open('lib/firebase_options.dart', 'w') as f:
+    f.write(dart_code)
+
+print("Generated firebase_options.dart")
+print(dart_code)
+EOF
+
+      - name: Update OAuth Client ID
+        run: |
+          # Use the staging OAuth client ID (same project number as staging)
+          cat > lib/config/google_oauth_web_client_id.dart << 'EOF'
+/// OAuth 2.0 **Web** client ID for attnote-staging
+/// 
+/// This is the Web client OAuth ID from Google Cloud Console.
+/// Project: attnote-staging (714889227250)
+const String kGoogleOAuthWebClientId =
+    '714889227250-vmo0qst7di9vtorsgh02v3cbtknsq57j.apps.googleusercontent.com';
+EOF
+          echo "Updated OAuth client ID for staging"
 
       - name: Build web
         run: flutter build web --release
 
       - name: Deploy to Firebase Hosting (staging)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
           firebase deploy --only hosting --project "${{ vars.FIREBASE_STAGING_PROJECT_ID }}"

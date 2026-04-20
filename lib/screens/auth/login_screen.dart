@@ -85,20 +85,26 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _googleLoading = true);
 
     try {
+      debugPrint('Starting Google Sign-In...');
       final credential = await _authService.signInWithGoogle();
+      debugPrint('Google Sign-In credential: ${credential != null ? "success" : "cancelled"}');
+      
       if (credential == null) {
         // User cancelled
+        debugPrint('User cancelled Google Sign-In');
         if (mounted) setState(() => _googleLoading = false);
         return;
       }
       if (mounted) setState(() => _googleLoading = false);
     } on FirebaseAuthException catch (e) {
+      debugPrint('FirebaseAuthException during Google Sign-In: ${e.code} - ${e.message}');
       if (mounted) setState(() => _googleLoading = false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AuthService.messageForAuthException(e))),
       );
     } catch (e) {
+      debugPrint('Unexpected error during Google Sign-In: $e');
       if (mounted) setState(() => _googleLoading = false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
