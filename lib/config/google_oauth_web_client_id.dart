@@ -8,4 +8,4 @@
 /// **Authorized JavaScript origins** includes `http://localhost:<port>` for
 /// local dev and your production domain.
 const String kGoogleOAuthWebClientId =
-    '655558333883-pk3la5chj8nk1q4b9smdvhk0fu8rmgp0.apps.googleusercontent.com';
+    '714889227250-vmo0qst7di9vtorsgh02v3cbtknsq57j.apps.googleusercontent.com';
