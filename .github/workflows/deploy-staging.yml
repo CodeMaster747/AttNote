@@ -13,7 +13,7 @@ jobs:
       # Manual "Run workflow" defaults to the default branch (`main`), which may not
       # include Hosting config yet; staging deploys should use `develop`.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'push' && github.sha || 'develop' }}
 
