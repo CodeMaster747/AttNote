@@ -111,18 +111,15 @@ EOF
 
       - name: Update OAuth Client ID
         run: |
-          # TODO: Update this with the production OAuth client ID
-          # Get it from: https://console.cloud.google.com/apis/credentials?project=attnote-prod
           cat > lib/config/google_oauth_web_client_id.dart << 'EOF'
 /// OAuth 2.0 **Web** client ID for attnote-prod
 /// 
 /// This is the Web client OAuth ID from Google Cloud Console.
-/// TODO: Update with actual production OAuth client ID
+/// Project: attnote-prod (621960649863)
 const String kGoogleOAuthWebClientId =
-    'YOUR_PRODUCTION_OAUTH_CLIENT_ID.apps.googleusercontent.com';
+    '621960649863-d1cq11hd0isuoa7tiandtejvt3scm8c6.apps.googleusercontent.com';
 EOF
           echo "Updated OAuth client ID for production"
-          echo "WARNING: Production OAuth client ID needs to be configured!"
 
       - name: Build web
         run: flutter build web --release
