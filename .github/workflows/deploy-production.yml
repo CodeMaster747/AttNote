@@ -41,9 +41,12 @@ jobs:
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
           flutterfire configure \
             --project=${{ vars.FIREBASE_PROD_PROJECT_ID }} \
-            --platforms=web \
+            --platforms=web,android \
             --yes \
             --out=lib/firebase_options.dart
+
+      - name: Extract and update OAuth Client ID
+        run: bash scripts/update_google_oauth_client_id.sh
 
       - name: Build web
         run: flutter build web --release
