@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "default": "attnote-dd1f2",
+    "staging": "attnote-staging",
+    "production": "attnote-prod"
+  },
+  "targets": {},
+  "etags": {}
+}
