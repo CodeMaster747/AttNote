@@ -33,3 +33,4 @@ npm run test:rules
 ```
 trigger checks
 staging trigger
+staging trigger
