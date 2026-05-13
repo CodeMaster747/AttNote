@@ -15,7 +15,23 @@ def main() -> int:
         print(f"error: {config_path} not found", file=sys.stderr)
         return 1
 
-    config = json.loads(config_path.read_text())
+    raw = config_path.read_text()
+    print(f"--- firebase-config.json ({len(raw)} bytes) ---")
+    print(raw[:2000])
+    print("--- end ---")
+
+    # `firebase apps:sdkconfig WEB` may emit a JS snippet
+    # (`firebase.initializeApp({...});`) instead of pure JSON.
+    # Extract the object literal in that case.
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError:
+        import re
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if not match:
+            print("error: no JSON object found in firebase-config.json", file=sys.stderr)
+            return 1
+        config = json.loads(match.group(0))
 
     api_key = config.get("apiKey", "")
     app_id = config.get("appId", "")

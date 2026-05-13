@@ -40,8 +40,13 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
+          set -x
+          firebase --version
           firebase use ${{ vars.FIREBASE_PROD_PROJECT_ID }}
+          firebase apps:list WEB --project=${{ vars.FIREBASE_PROD_PROJECT_ID }}
           firebase apps:sdkconfig WEB --project=${{ vars.FIREBASE_PROD_PROJECT_ID }} > firebase-config.json
+          echo "--- firebase-config.json size:"
+          wc -c firebase-config.json
           python3 scripts/generate_firebase_options.py
 
       - name: Update OAuth Client ID
