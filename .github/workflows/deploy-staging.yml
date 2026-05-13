@@ -49,9 +49,20 @@ jobs:
           set -x
           firebase --version
           firebase use ${{ vars.FIREBASE_STAGING_PROJECT_ID }}
-          firebase apps:list WEB --project=${{ vars.FIREBASE_STAGING_PROJECT_ID }}
-          firebase apps:sdkconfig WEB --project=${{ vars.FIREBASE_STAGING_PROJECT_ID }} > firebase-config.json
-          echo "--- firebase-config.json size:"
+
+          # The project may have multiple Web apps (e.g. a leftover
+          # Windows-as-Web entry from Flutter desktop setup). Pick the first
+          # Web app whose display name does NOT contain "windows".
+          APP_ID=$(firebase apps:list WEB --project=${{ vars.FIREBASE_STAGING_PROJECT_ID }} --json \
+            | jq -r '[.result[] | select((.displayName // "") | ascii_downcase | contains("windows") | not)][0].appId // empty')
+          if [ -z "$APP_ID" ]; then
+            echo "ERROR: no eligible Web app found in ${{ vars.FIREBASE_STAGING_PROJECT_ID }}"
+            firebase apps:list WEB --project=${{ vars.FIREBASE_STAGING_PROJECT_ID }}
+            exit 1
+          fi
+          echo "Using Web app: $APP_ID"
+
+          firebase apps:sdkconfig WEB "$APP_ID" --project=${{ vars.FIREBASE_STAGING_PROJECT_ID }} > firebase-config.json
           wc -c firebase-config.json
           python3 scripts/generate_firebase_options.py
 
