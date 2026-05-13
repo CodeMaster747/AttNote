@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 
 import '../theme/app_spacing.dart';
+import '../theme/app_theme.dart';
 
 class SectionHeader extends StatelessWidget {
   const SectionHeader({
@@ -10,7 +10,7 @@ class SectionHeader extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.trailing,
-    this.padding = AppSpacing.sectionPadding,
+    this.padding = EdgeInsets.zero,
   });
 
   final String title;
@@ -21,7 +21,7 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colors = AppColors.of(context);
 
     return Padding(
       padding: padding,
@@ -34,17 +34,17 @@ class SectionHeader extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: colorScheme.onSurface,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: colors.textPrimary,
                   ),
                 ),
                 if (subtitle != null) ...[
-                  const Gap(AppSpacing.xs),
+                  const Gap(AppSpacing.xxs),
                   Text(
                     subtitle!,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colors.textTertiary,
                     ),
                   ),
                 ],
@@ -57,9 +57,6 @@ class SectionHeader extends StatelessWidget {
           ],
         ],
       ),
-    )
-        .animate()
-        .fadeIn(duration: 160.ms, curve: Curves.easeOut)
-        .slideY(begin: 0.02, end: 0, duration: 180.ms, curve: Curves.easeOut);
+    );
   }
 }

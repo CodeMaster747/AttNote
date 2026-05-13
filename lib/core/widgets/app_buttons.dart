@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_spinkit/flutter_spinkit.dart';
 
+import '../theme/app_theme.dart';
+
+/// Primary filled button — the single saturated affordance on a screen.
 class AppPrimaryButton extends StatelessWidget {
   const AppPrimaryButton({
     super.key,
@@ -17,28 +19,30 @@ class AppPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final buttonChild = isLoading
-        ? _ButtonLoadingContent(label: label)
-        : Text(label);
+    final child = isLoading
+        ? _LoadingChild(label: label, color: Theme.of(context).colorScheme.onPrimary)
+        : icon != null
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 16),
+                  const SizedBox(width: 8),
+                  Text(label),
+                ],
+              )
+            : Text(label);
 
-    final button = icon != null && !isLoading
-        ? FilledButton.icon(
-            onPressed: onPressed,
-            icon: Icon(icon),
-            label: buttonChild,
-          )
-        : FilledButton(
-            onPressed: onPressed,
-            child: buttonChild,
-          );
-
-    return _ScaleOnPress(
+    return _PressFeedback(
       enabled: onPressed != null && !isLoading,
-      child: button,
+      child: FilledButton(
+        onPressed: isLoading ? null : onPressed,
+        child: child,
+      ),
     );
   }
 }
 
+/// Secondary outlined button — neutral, low-emphasis.
 class AppSecondaryButton extends StatelessWidget {
   const AppSecondaryButton({
     super.key,
@@ -53,23 +57,24 @@ class AppSecondaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = icon != null
-        ? OutlinedButton.icon(
-            onPressed: onPressed,
-            icon: Icon(icon),
-            label: Text(label),
+    final child = icon != null
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16),
+              const SizedBox(width: 8),
+              Text(label),
+            ],
           )
-        : OutlinedButton(
-            onPressed: onPressed,
-            child: Text(label),
-          );
-    return _ScaleOnPress(
+        : Text(label);
+    return _PressFeedback(
       enabled: onPressed != null,
-      child: button,
+      child: OutlinedButton(onPressed: onPressed, child: child),
     );
   }
 }
 
+/// Plain text affordance.
 class AppTextButton extends StatelessWidget {
   const AppTextButton({
     super.key,
@@ -84,72 +89,75 @@ class AppTextButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = icon != null
-        ? TextButton.icon(
-            onPressed: onPressed,
-            icon: Icon(icon),
-            label: Text(label),
+    final child = icon != null
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16),
+              const SizedBox(width: 6),
+              Text(label),
+            ],
           )
-        : TextButton(
-            onPressed: onPressed,
-            child: Text(label),
-          );
-    return _ScaleOnPress(
+        : Text(label);
+    return _PressFeedback(
       enabled: onPressed != null,
-      child: button,
+      child: TextButton(onPressed: onPressed, child: child),
     );
   }
 }
 
-class _ButtonLoadingContent extends StatelessWidget {
-  const _ButtonLoadingContent({required this.label});
+class _LoadingChild extends StatelessWidget {
+  const _LoadingChild({required this.label, required this.color});
 
   final String label;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onPrimary;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SpinKitThreeBounce(
-          color: color,
-          size: 14,
+        SizedBox(
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(
+            strokeWidth: 1.6,
+            color: color,
+          ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 10),
         Text(label),
       ],
     );
   }
 }
 
-class _ScaleOnPress extends StatefulWidget {
-  const _ScaleOnPress({
-    required this.child,
-    required this.enabled,
-  });
+/// Subtle press feedback — opacity tweak instead of scale, keeps the
+/// interaction calm and SaaS-grade.
+class _PressFeedback extends StatefulWidget {
+  const _PressFeedback({required this.child, required this.enabled});
 
   final Widget child;
   final bool enabled;
 
   @override
-  State<_ScaleOnPress> createState() => _ScaleOnPressState();
+  State<_PressFeedback> createState() => _PressFeedbackState();
 }
 
-class _ScaleOnPressState extends State<_ScaleOnPress> {
+class _PressFeedbackState extends State<_PressFeedback> {
   bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
-    final scale = widget.enabled && _pressed ? 0.985 : 1.0;
+    final opacity = widget.enabled && _pressed ? 0.85 : 1.0;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTapDown: widget.enabled ? (_) => setState(() => _pressed = true) : null,
       onTapUp: widget.enabled ? (_) => setState(() => _pressed = false) : null,
       onTapCancel: widget.enabled ? () => setState(() => _pressed = false) : null,
-      child: AnimatedScale(
-        scale: scale,
-        duration: const Duration(milliseconds: 90),
+      child: AnimatedOpacity(
+        opacity: opacity,
+        duration: AppDuration.fast,
         curve: Curves.easeOut,
         child: widget.child,
       ),

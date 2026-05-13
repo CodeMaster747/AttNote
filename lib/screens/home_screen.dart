@@ -7,6 +7,7 @@ import 'subject_screen.dart';
 import 'settings_screen.dart';
 import 'analytics_screen.dart';
 import '../core/theme/app_spacing.dart';
+import '../core/theme/app_theme.dart';
 import '../core/widgets/widgets.dart';
 import '../services/auth_service.dart';
 import '../screens/auth/profile_screen.dart';
@@ -51,7 +52,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _department = data['department'] ?? '';
       });
 
-      // Load quick analytics
       final analyticsService = AnalyticsService();
       final now = DateTime.now();
       final analytics = await analyticsService.getAttendanceAnalytics(
@@ -78,18 +78,47 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _getGreeting() {
     final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  Future<void> _confirmLogout(AuthService auth) async {
+    final colors = AppColors.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Log out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.danger,
+            ),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await auth.signOut();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = AuthService();
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colors = AppColors.of(context);
 
     return Scaffold(
+      backgroundColor: colors.background,
       body: Stack(
         children: [
           const AmbientBackground(),
@@ -97,200 +126,135 @@ class _HomeScreenState extends State<HomeScreen> {
             onRefresh: _loadUserData,
             child: CustomScrollView(
               slivers: [
-            // Custom App Bar with greeting
-            SliverAppBar(
-              expandedHeight: 140,
-              floating: false,
-              pinned: true,
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
-                title: Text(
-                  'AttNote',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                background: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        colorScheme.primaryContainer.withValues(alpha: 0.5),
-                        colorScheme.surface,
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
+                SliverAppBar(
+                  pinned: true,
+                  floating: false,
+                  backgroundColor: colors.background,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  title: Text(
+                    'AttNote',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: colors.textPrimary,
                     ),
                   ),
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.logout_rounded, size: 18),
+                      tooltip: 'Log out',
+                      onPressed: () => _confirmLogout(auth),
+                    ),
+                    const Gap(AppSpacing.xs),
+                  ],
                 ),
-              ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.logout_rounded),
-                  tooltip: 'Logout',
-                  onPressed: () async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        icon: Icon(
-                          Icons.logout_rounded,
-                          color: colorScheme.error,
-                        ),
-                        title: const Text('Logout'),
-                        content: const Text('Are you sure you want to logout?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(false),
-                            child: const Text('Cancel'),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.of(context).pop(true),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: colorScheme.error,
-                              foregroundColor: colorScheme.onError,
+
+                SliverPadding(
+                  padding: AppSpacing.pagePadding,
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      // Greeting
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _getGreeting(),
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: colors.textTertiary,
+                                  ),
+                                ),
+                                const Gap(2),
+                                Text(
+                                  _userName.isNotEmpty ? _userName : 'Student',
+                                  style: theme.textTheme.headlineSmall?.copyWith(
+                                    color: colors.textPrimary,
+                                  ),
+                                ),
+                                if (_department.isNotEmpty) ...[
+                                  const Gap(2),
+                                  Text(
+                                    _department,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colors.textTertiary,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                            child: const Text('Logout'),
+                          ),
+                          _Avatar(
+                            label: _userName,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ProfileScreen(),
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                    );
 
-                    if (confirmed == true) {
-                      await auth.signOut();
-                      // AuthWrapper navigates via authStateChanges — no manual route.
-                    }
-                  },
-                ),
-                const Gap(AppSpacing.xxs),
-              ],
-            ),
+                      const Gap(AppSpacing.lg),
 
-            SliverPadding(
-              padding: AppSpacing.pagePadding,
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  // Greeting Section
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _getGreeting(),
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            const Gap(AppSpacing.xxs),
-                            Text(
-                              _userName.isNotEmpty ? _userName : 'Student',
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            if (_department.isNotEmpty) ...[
-                              const Gap(AppSpacing.xxs),
-                              Text(
-                                _department,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                      // Quick stats
+                      _buildQuickStatsCard(theme, colors),
+
+                      const Gap(AppSpacing.lg),
+
+                      // Quick access
+                      SectionHeader(
+                        title: 'Quick access',
+                        subtitle: 'Jump to commonly used sections',
                       ),
-                      GestureDetector(
+                      const Gap(AppSpacing.sm),
+
+                      FeatureCard(
+                        title: 'Subjects & attendance',
+                        description: 'Manage subjects and track attendance',
+                        icon: Icons.school_outlined,
                         onTap: () => Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const ProfileScreen(),
-                          ),
-                        ),
-                        child: CircleAvatar(
-                          radius: 28,
-                          backgroundColor: colorScheme.primaryContainer,
-                          child: Text(
-                            _userName.isNotEmpty
-                                ? _userName[0].toUpperCase()
-                                : 'S',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: colorScheme.onPrimaryContainer,
-                            ),
-                          ),
+                          MaterialPageRoute(builder: (_) => const SubjectScreen()),
                         ),
                       ),
-                    ],
-                  ),
-
-                  const Gap(AppSpacing.lg),
-
-                  // Quick Stats Card
-                  _buildQuickStatsCard(theme, colorScheme),
-
-                  const Gap(AppSpacing.lg),
-
-                  // Quick Access Section
-                  SectionHeader(
-                    title: 'Quick Access',
-                    subtitle: 'Jump to commonly used sections',
-                    padding: EdgeInsets.zero,
-                  ),
-                  const Gap(AppSpacing.sm),
-
-                  FeatureCard(
-                    title: 'Subjects & Attendance',
-                    description: 'Manage your subjects and track attendance',
-                    icon: Icons.school_outlined,
-                    accentColor: colorScheme.primary,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SubjectScreen()),
-                    ),
-                  ),
-                  const Gap(AppSpacing.sm),
-                  FeatureCard(
-                    title: 'Analytics',
-                    description: 'View attendance analytics and insights',
-                    icon: Icons.insights_outlined,
-                    accentColor: colorScheme.tertiary,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AnalyticsScreen(),
+                      const Gap(AppSpacing.sm),
+                      FeatureCard(
+                        title: 'Analytics',
+                        description: 'View attendance analytics and insights',
+                        icon: Icons.insights_outlined,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+                        ),
                       ),
-                    ),
-                  ),
-                  const Gap(AppSpacing.sm),
-                  FeatureCard(
-                    title: 'Profile',
-                    description: 'Manage your personal information',
-                    icon: Icons.person_outline,
-                    accentColor: colorScheme.secondary,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ProfileScreen(),
+                      const Gap(AppSpacing.sm),
+                      FeatureCard(
+                        title: 'Profile',
+                        description: 'Manage your personal information',
+                        icon: Icons.person_outline,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                        ),
                       ),
-                    ),
+                      const Gap(AppSpacing.sm),
+                      FeatureCard(
+                        title: 'Settings',
+                        description: 'App settings and preferences',
+                        icon: Icons.settings_outlined,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                        ),
+                      ),
+                      const Gap(AppSpacing.lg),
+                    ]),
                   ),
-                  const Gap(AppSpacing.sm),
-                  FeatureCard(
-                    title: 'Settings',
-                    description: 'App settings and preferences',
-                    icon: Icons.settings_outlined,
-                    accentColor: colorScheme.onSurfaceVariant,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                    ),
-                  ),
-                  const Gap(AppSpacing.lg),
-                ]),
-              ),
-            ),
+                ),
               ],
             ),
           ),
@@ -299,9 +263,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildQuickStatsCard(ThemeData theme, ColorScheme colorScheme) {
+  Widget _buildQuickStatsCard(ThemeData theme, AppColors colors) {
     if (_loadingStats) {
-      return const SizedBox(height: 120, child: AppShimmer(child: _StatsSkeleton()));
+      return const _StatsSkeleton();
     }
 
     final percentage = _quickStats?.overallPercentage ?? 0.0;
@@ -309,131 +273,164 @@ class _HomeScreenState extends State<HomeScreen> {
     final totalAbsent = _quickStats?.totalAbsent ?? 0;
     final totalClasses = _quickStats?.totalClasses ?? 0;
 
-    Color percentageColor;
+    final Color percentageColor;
     if (percentage >= 75) {
-      percentageColor = colorScheme.tertiary;
+      percentageColor = colors.success;
     } else if (percentage >= 50) {
-      percentageColor = colorScheme.secondary;
+      percentageColor = colors.warning;
     } else {
-      percentageColor = colorScheme.error;
+      percentageColor = colors.danger;
     }
 
     return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.bar_chart_rounded,
-                  size: 20,
-                  color: colorScheme.primary,
+          Row(
+            children: [
+              Text(
+                'Last 30 days',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: colors.textTertiary,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.2,
                 ),
-                const Gap(AppSpacing.xs),
+              ),
+              const Spacer(),
+              if (totalClasses > 0)
                 Text(
-                  'Monthly Overview',
+                  '${percentage.toStringAsFixed(0)}%',
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: colorScheme.primary,
+                    color: percentageColor,
+                  ),
+                ),
+            ],
+          ),
+          const Gap(AppSpacing.sm),
+          if (totalClasses == 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: Text(
+                'No attendance data yet. Add subjects to begin.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colors.textTertiary,
+                ),
+              ),
+            )
+          else ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: LinearProgressIndicator(
+                value: percentage / 100,
+                minHeight: 6,
+                backgroundColor: colors.surfaceMuted,
+                valueColor: AlwaysStoppedAnimation<Color>(percentageColor),
+              ),
+            ),
+            const Gap(AppSpacing.md),
+            Row(
+              children: [
+                Expanded(
+                  child: _StatItem(
+                    label: 'Total',
+                    value: totalClasses.toString(),
+                    color: colors.textPrimary,
+                  ),
+                ),
+                Container(width: 1, height: 28, color: colors.border),
+                Expanded(
+                  child: _StatItem(
+                    label: 'Present',
+                    value: totalPresent.toString(),
+                    color: colors.textPrimary,
+                  ),
+                ),
+                Container(width: 1, height: 28, color: colors.border),
+                Expanded(
+                  child: _StatItem(
+                    label: 'Absent',
+                    value: totalAbsent.toString(),
+                    color: colors.textPrimary,
                   ),
                 ),
               ],
             ),
-            const Gap(AppSpacing.md),
-            if (totalClasses == 0)
-              const EmptyState(
-                title: 'No attendance data yet',
-                message: 'Start by adding subjects!',
-                icon: Icons.bar_chart_rounded,
-                padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
-              )
-            else
-              Row(
-                children: [
-                  // Percentage circle
-                  SizedBox(
-                    width: 72,
-                    height: 72,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        CircularProgressIndicator(
-                          value: percentage / 100,
-                          strokeWidth: 8,
-                          backgroundColor: colorScheme.surfaceContainerHighest,
-                          color: percentageColor,
-                          strokeCap: StrokeCap.round,
-                        ),
-                        Center(
-                          child: Text(
-                            '${percentage.toStringAsFixed(0)}%',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: percentageColor,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Gap(AppSpacing.lg),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        _buildStatRow(
-                          'Total Classes',
-                          totalClasses.toString(),
-                          colorScheme.onSurface,
-                          theme,
-                        ),
-                        const Gap(AppSpacing.xs),
-                        _buildStatRow(
-                          'Present',
-                          totalPresent.toString(),
-                          colorScheme.tertiary,
-                          theme,
-                        ),
-                        const Gap(AppSpacing.xs),
-                        _buildStatRow(
-                          'Absent',
-                          totalAbsent.toString(),
-                          colorScheme.error,
-                          theme,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+          ],
         ],
       ),
     );
   }
+}
 
-  Widget _buildStatRow(
-    String label,
-    String value,
-    Color color,
-    ThemeData theme,
-  ) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+class _StatItem extends StatelessWidget {
+  const _StatItem({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = AppColors.of(context);
+    return Column(
       children: [
         Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        Text(
           value,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.bold,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
             color: color,
           ),
         ),
+        const Gap(2),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: colors.textTertiary,
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  const _Avatar({required this.label, this.onTap});
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = AppColors.of(context);
+    final initial = label.isNotEmpty ? label[0].toUpperCase() : 'S';
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: colors.surfaceMuted,
+          shape: BoxShape.circle,
+          border: Border.all(color: colors.border),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          initial,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: colors.textPrimary,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -443,14 +440,21 @@ class _StatsSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const AppCard(
-      child: Column(
+    final colors = AppColors.of(context);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: colors.border),
+      ),
+      child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ShimmerLine(height: 14, width: 120),
+          ShimmerLine(height: 12, width: 100),
+          Gap(AppSpacing.sm),
+          ShimmerLine(height: 6),
           Gap(AppSpacing.md),
-          ShimmerLine(height: 14),
-          Gap(AppSpacing.xs),
           ShimmerLine(height: 14, width: 220),
         ],
       ),

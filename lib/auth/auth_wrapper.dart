@@ -2,13 +2,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../screens/auth/login_screen.dart';
+import '../core/theme/app_spacing.dart';
+import '../core/theme/app_theme.dart';
+import '../screens/auth/landing_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/staff_home_screen.dart';
 import '../services/auth_service.dart';
 
-/// Routes to [LoginScreen] or the correct home based on auth + Firestore role.
-/// Navigation after sign-in/sign-out is driven only by [authStateChanges].
+/// Routes to [LandingScreen] (pre-auth) or the correct post-auth home based on
+/// Firestore role. Navigation is driven only by [authStateChanges].
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
@@ -25,7 +27,7 @@ class AuthWrapper extends StatelessWidget {
 
         final user = snapshot.data;
         if (user == null) {
-          return const LoginScreen();
+          return const LandingScreen();
         }
 
         return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -46,7 +48,7 @@ class AuthWrapper extends StatelessWidget {
 
             final doc = userSnapshot.data;
             if (doc == null || !doc.exists) {
-              return const LoginScreen();
+              return const LandingScreen();
             }
 
             final data = doc.data();
@@ -69,43 +71,42 @@ class _SplashView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final colors = AppColors.of(context);
 
     return Scaffold(
+      backgroundColor: colors.background,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(20),
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [colorScheme.primary, colorScheme.tertiary],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(24),
+                color: colorScheme.primary,
+                borderRadius: BorderRadius.circular(AppRadius.md),
               ),
-              child: const Icon(
-                Icons.school_rounded,
-                size: 48,
-                color: Colors.white,
+              child: Icon(
+                Icons.school_outlined,
+                size: 24,
+                color: colorScheme.onPrimary,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpacing.md),
             Text(
               'AttNote',
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                letterSpacing: -0.5,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colors.textPrimary,
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: AppSpacing.lg),
             SizedBox(
-              width: 28,
-              height: 28,
+              width: 18,
+              height: 18,
               child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: colorScheme.primary,
+                strokeWidth: 1.6,
+                color: colors.textTertiary,
               ),
             ),
           ],
@@ -127,22 +128,39 @@ class _AuthErrorView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = AppColors.of(context);
     return Scaffold(
+      backgroundColor: colors.background,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           child: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.error_outline, size: 56, color: theme.colorScheme.error),
-                const SizedBox(height: 16),
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colors.surfaceMuted,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: colors.border),
+                  ),
+                  child: Icon(
+                    Icons.error_outline,
+                    size: 20,
+                    color: colors.danger,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
                 Text(
                   message,
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyLarge,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.textSecondary,
+                  ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: AppSpacing.md),
                 FilledButton(
                   onPressed: () async {
                     await onRetry();

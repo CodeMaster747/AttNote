@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
 
 import '../theme/app_spacing.dart';
+import '../theme/app_theme.dart';
 
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,
     required this.title,
     required this.message,
-    this.icon = Icons.inbox_rounded,
+    this.icon = Icons.inbox_outlined,
     this.action,
     this.padding = AppSpacing.pagePadding,
   });
@@ -22,7 +23,7 @@ class EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colors = AppColors.of(context);
 
     return Padding(
       padding: padding,
@@ -30,25 +31,37 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 56, color: colorScheme.primary),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: colors.surfaceMuted,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: colors.border),
+              ),
+              child: Icon(icon, size: 20, color: colors.textTertiary),
+            ),
             const Gap(AppSpacing.md),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
               ),
             ),
-            const Gap(AppSpacing.xs),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+            const Gap(AppSpacing.xxs),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.textTertiary,
+                ),
               ),
             ),
             if (action != null) ...[
-              const Gap(AppSpacing.lg),
+              const Gap(AppSpacing.md),
               action!,
             ],
           ],

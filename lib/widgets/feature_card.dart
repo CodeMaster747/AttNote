@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
 
-class FeatureCard extends StatelessWidget {
+import '../core/theme/app_spacing.dart';
+import '../core/theme/app_theme.dart';
+
+/// Structured row used in nav-style lists. Flat, bordered, with a subtle
+/// neutral icon tile — no colored chips, no glow.
+class FeatureCard extends StatefulWidget {
   final String title;
   final String description;
   final IconData icon;
@@ -20,59 +25,83 @@ class FeatureCard extends StatelessWidget {
   });
 
   @override
+  State<FeatureCard> createState() => _FeatureCardState();
+}
+
+class _FeatureCardState extends State<FeatureCard> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final Color effectiveAccent = accentColor ?? colorScheme.primary;
+    final colors = AppColors.of(context);
+    final radius = BorderRadius.circular(AppRadius.lg);
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: AppDuration.base,
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.md,
+          ),
+          decoration: BoxDecoration(
+            color: _hovered ? colors.surfaceMuted : colors.surface,
+            borderRadius: radius,
+            border: Border.all(color: colors.border),
+          ),
           child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  color: effectiveAccent.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: effectiveAccent.withValues(alpha: 0.22),
-                    width: 1,
-                  ),
+                  color: colors.surfaceMuted,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  border: Border.all(color: colors.border),
                 ),
-                child: Icon(icon, color: effectiveAccent, size: 22),
+                child: Icon(
+                  widget.icon,
+                  size: 16,
+                  color: colors.textSecondary,
+                ),
               ),
-              const Gap(16),
+              const Gap(AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                      widget.title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: colors.textPrimary,
                       ),
                     ),
-                    const Gap(6),
+                    const Gap(2),
                     Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
+                      widget.description,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.textTertiary,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
-              const Gap(12),
-              trailing ??
+              const Gap(AppSpacing.sm),
+              widget.trailing ??
                   Icon(
-                    Icons.chevron_right_rounded,
-                    size: 20,
-                    color: colorScheme.onSurfaceVariant,
+                    Icons.arrow_forward_rounded,
+                    size: 16,
+                    color: colors.textTertiary,
                   ),
             ],
           ),

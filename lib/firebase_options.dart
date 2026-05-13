@@ -1,10 +1,13 @@
-// File generated for Firebase project: attnote-staging
 // ignore_for_file: type=lint
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-/// Default [FirebaseOptions] for use with your Firebase apps.
+/// Firebase options sourced from the project `.env` file.
+///
+/// Edit `.env` (or copy `.env.example`) to point this app at your own
+/// Firebase project — no code changes needed.
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
@@ -27,13 +30,23 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyArQrd7L21L_o_fEK4q7WsmKC2cFjIfFLE',
-    appId: '1:714889227250:web:18aaee6ad449015d6c196b',
-    messagingSenderId: '714889227250',
-    projectId: 'attnote-staging',
-    authDomain: 'attnote-staging.firebaseapp.com',
-    storageBucket: 'attnote-staging.firebasestorage.app',
-    measurementId: 'G-36H19KBX79',
-  );
+  static FirebaseOptions get web => FirebaseOptions(
+        apiKey: _required('FIREBASE_API_KEY'),
+        appId: _required('FIREBASE_APP_ID'),
+        messagingSenderId: _required('FIREBASE_MESSAGING_SENDER_ID'),
+        projectId: _required('FIREBASE_PROJECT_ID'),
+        authDomain: _required('FIREBASE_AUTH_DOMAIN'),
+        storageBucket: _required('FIREBASE_STORAGE_BUCKET'),
+        measurementId: dotenv.maybeGet('FIREBASE_MEASUREMENT_ID'),
+      );
+
+  static String _required(String key) {
+    final value = dotenv.maybeGet(key);
+    if (value == null || value.isEmpty) {
+      throw StateError(
+        'Missing $key in .env — copy .env.example to .env and fill it in.',
+      );
+    }
+    return value;
+  }
 }
