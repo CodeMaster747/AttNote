@@ -3,21 +3,20 @@ import 'package:gap/gap.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../theme/app_spacing.dart';
+import '../theme/app_theme.dart';
 
 class AppShimmer extends StatelessWidget {
-  const AppShimmer({
-    super.key,
-    required this.child,
-  });
+  const AppShimmer({super.key, required this.child});
 
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final colors = AppColors.of(context);
     return Shimmer.fromColors(
-      baseColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
-      highlightColor: colorScheme.surface,
+      baseColor: colors.surfaceMuted,
+      highlightColor: colors.surface,
+      period: const Duration(milliseconds: 1400),
       child: child,
     );
   }
@@ -28,7 +27,7 @@ class ShimmerLine extends StatelessWidget {
     super.key,
     this.height = 12,
     this.width = double.infinity,
-    this.radius = 8,
+    this.radius = 6,
   });
 
   final double height;
@@ -54,7 +53,7 @@ class ShimmerCardList extends StatelessWidget {
   const ShimmerCardList({
     super.key,
     this.itemCount = 4,
-    this.padding = AppSpacing.pagePadding,
+    this.padding = EdgeInsets.zero,
   });
 
   final int itemCount;
@@ -64,8 +63,10 @@ class ShimmerCardList extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView.separated(
       padding: padding,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       itemCount: itemCount,
-      separatorBuilder: (_, __) => const Gap(AppSpacing.md),
+      separatorBuilder: (_, __) => const Gap(AppSpacing.sm),
       itemBuilder: (_, __) => const _ShimmerCardItem(),
     );
   }
@@ -76,16 +77,18 @@ class _ShimmerCardItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(16),
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: colors.border),
       ),
       child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ShimmerLine(height: 16, width: 180),
+          ShimmerLine(height: 14, width: 180),
           Gap(AppSpacing.sm),
           ShimmerLine(height: 12),
           Gap(AppSpacing.xs),
@@ -97,10 +100,7 @@ class _ShimmerCardItem extends StatelessWidget {
 }
 
 class ShimmerCircleAvatar extends StatelessWidget {
-  const ShimmerCircleAvatar({
-    super.key,
-    this.size = 44,
-  });
+  const ShimmerCircleAvatar({super.key, this.size = 40});
 
   final double size;
 

@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:attnote/core/theme/app_theme.dart';
 import 'package:attnote/widgets/feature_card.dart';
 
 void main() {
   testWidgets('FeatureCard renders title and description', (tester) async {
     await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: const Scaffold(
           body: FeatureCard(
             title: 'Profile',
             description: 'Manage your profile',

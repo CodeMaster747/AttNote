@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 import '../theme/app_spacing.dart';
+import '../theme/app_theme.dart';
 
-class AppCard extends StatelessWidget {
+/// Flat, bordered container used as the primary grouping primitive.
+///
+/// No drop shadows — depth comes from a subtle border + an optional muted
+/// background. Tap state is a soft background shift, not a scale.
+class AppCard extends StatefulWidget {
   const AppCard({
     super.key,
     required this.child,
@@ -11,8 +15,9 @@ class AppCard extends StatelessWidget {
     this.margin,
     this.onTap,
     this.backgroundColor,
-    this.borderRadius = 16,
-    this.elevation = 0,
+    this.borderColor,
+    this.borderRadius = AppRadius.lg,
+    this.interactive = true,
   });
 
   final Widget child;
@@ -20,36 +25,49 @@ class AppCard extends StatelessWidget {
   final EdgeInsetsGeometry? margin;
   final VoidCallback? onTap;
   final Color? backgroundColor;
+  final Color? borderColor;
   final double borderRadius;
-  final double elevation;
+  final bool interactive;
+
+  @override
+  State<AppCard> createState() => _AppCardState();
+}
+
+class _AppCardState extends State<AppCard> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final card = Card(
-      elevation: elevation,
-      margin: margin ?? EdgeInsets.zero,
-      color: backgroundColor ?? colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(borderRadius),
+    final colors = AppColors.of(context);
+    final bg = widget.backgroundColor ?? colors.surface;
+    final border = widget.borderColor ?? colors.border;
+    final radius = BorderRadius.circular(widget.borderRadius);
+    final hoverable = widget.onTap != null && widget.interactive;
+
+    final container = AnimatedContainer(
+      duration: AppDuration.base,
+      curve: Curves.easeOut,
+      margin: widget.margin,
+      padding: widget.padding,
+      decoration: BoxDecoration(
+        color: hoverable && _hovered ? colors.surfaceMuted : bg,
+        borderRadius: radius,
+        border: Border.all(color: border, width: 1),
       ),
-      child: Padding(
-        padding: padding,
-        child: child,
-      ),
+      child: widget.child,
     );
 
-    final animatedCard = card
-        .animate()
-        .fadeIn(duration: 180.ms, curve: Curves.easeOut)
-        .slideY(begin: 0.03, end: 0, duration: 220.ms, curve: Curves.easeOut);
+    if (widget.onTap == null) return container;
 
-    if (onTap == null) return animatedCard;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: animatedCard,
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: container,
+      ),
     );
   }
 }
