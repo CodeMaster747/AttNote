@@ -23,6 +23,7 @@ firebase-debug.log
 firebase-debug.*.log
 .env
 .env.*
+!.env.example
 
 # Android signing secrets
 android/key.properties
