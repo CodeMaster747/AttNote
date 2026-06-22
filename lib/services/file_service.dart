@@ -1,5 +1,6 @@
 // services/file_service.dart
 import 'dart:io';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +8,14 @@ import 'package:flutter/foundation.dart';
 
 class FileService {
   final _storage = FirebaseStorage.instance;
+
+  /// All uploads live under the signed-in user's folder so they satisfy the
+  /// Storage rules (`users/{uid}/**`). Returns null if not signed in.
+  String? _userPath(String folder, String fileName) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+    return 'users/$uid/$folder/$fileName';
+  }
 
   Future<String?> uploadImage() async {
     try {
@@ -17,7 +26,9 @@ class FileService {
         final file = File(pickedFile.path);
         final fileName =
             '${DateTime.now().millisecondsSinceEpoch}_${pickedFile.name}';
-        final ref = _storage.ref().child('images/$fileName');
+        final storagePath = _userPath('images', fileName);
+        if (storagePath == null) return null;
+        final ref = _storage.ref().child(storagePath);
 
         await ref.putFile(file);
         return await ref.getDownloadURL();
@@ -40,7 +51,9 @@ class FileService {
         final file = File(result.files.single.path!);
         final fileName =
             '${DateTime.now().millisecondsSinceEpoch}_${result.files.single.name}';
-        final ref = _storage.ref().child('pdfs/$fileName');
+        final storagePath = _userPath('pdfs', fileName);
+        if (storagePath == null) return null;
+        final ref = _storage.ref().child(storagePath);
 
         await ref.putFile(file);
         final downloadUrl = await ref.getDownloadURL();
@@ -65,7 +78,9 @@ class FileService {
         final file = File(result.files.single.path!);
         final fileName =
             '${DateTime.now().millisecondsSinceEpoch}_${result.files.single.name}';
-        final ref = _storage.ref().child('text_files/$fileName');
+        final storagePath = _userPath('text_files', fileName);
+        if (storagePath == null) return null;
+        final ref = _storage.ref().child(storagePath);
 
         await ref.putFile(file);
         final downloadUrl = await ref.getDownloadURL();
@@ -92,7 +107,9 @@ class FileService {
       final picked = result.files.single;
       final fileName =
           '${DateTime.now().millisecondsSinceEpoch}_${picked.name}';
-      final ref = _storage.ref().child('$folder/$fileName');
+      final storagePath = _userPath(folder, fileName);
+      if (storagePath == null) return null;
+      final ref = _storage.ref().child(storagePath);
 
       if (kIsWeb) {
         final bytes = picked.bytes;
