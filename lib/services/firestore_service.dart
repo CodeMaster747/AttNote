@@ -3,14 +3,22 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import '../models/subject_model.dart';
 import '../models/attendance_model.dart';
+import '../models/course_model.dart';
+
+/// Result of attempting to add a student to a staff subject by email.
+enum AddStudentResult { added, alreadyAdded, notFound, notAStudent, isSelf, error }
 
 class FirestoreService {
   final _db = FirebaseFirestore.instance;
 
-  // Subject operations with proper error handling
+  // ---------------------------------------------------------------------------
+  // Subjects
+  // ---------------------------------------------------------------------------
+
+  /// Add a personal (student-owned) subject. Doc id is derived from the name.
   Future<void> addSubject(String uid, Subject subject) async {
     final docId = subject.name.trim().toLowerCase();
-    await FirebaseFirestore.instance
+    await _db
         .collection('users')
         .doc(uid)
         .collection('subjects')
@@ -18,45 +26,76 @@ class FirestoreService {
         .set(subject.toMap());
   }
 
-  Future<List<Subject>> getSubjects(String uid) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('subjects')
-        .get();
+  /// Create a staff-owned subject. Uses an auto-generated id so multiple
+  /// subjects with the same name are allowed. Returns the new id.
+  Future<String> createStaffSubject(String staffId, Subject subject) async {
+    final ref = _db.collection('users').doc(staffId).collection('subjects').doc();
+    final data = subject.toMap();
+    data['ownerRole'] = 'staff';
+    await ref.set(data);
+    return ref.id;
+  }
 
+  /// Update arbitrary fields on a subject document.
+  Future<void> updateSubject(
+    String ownerId,
+    String subjectId,
+    Map<String, dynamic> data,
+  ) async {
+    await _db
+        .collection('users')
+        .doc(ownerId)
+        .collection('subjects')
+        .doc(subjectId)
+        .update(data);
+  }
+
+  Future<List<Subject>> getSubjects(String uid) async {
+    final snapshot =
+        await _db.collection('users').doc(uid).collection('subjects').get();
     return snapshot.docs
         .map((doc) => Subject.fromMap(doc.data(), doc.id))
         .toList();
   }
 
-  // DELETE FUNCTIONALITY - Delete subject
-  Future<void> deleteSubject(String uid, String subjectName) async {
-    try {
-      final batch = _db.batch();
+  Future<Subject?> getSubject(String ownerId, String subjectId) async {
+    final doc = await _db
+        .collection('users')
+        .doc(ownerId)
+        .collection('subjects')
+        .doc(subjectId)
+        .get();
+    if (!doc.exists) return null;
+    return Subject.fromMap(doc.data()!, doc.id);
+  }
 
-      // Delete all attendance records for this subject
+  /// Delete a subject and its attendance. If it's a staff subject, also unlink
+  /// every enrolled student (remove their mirrored copy).
+  Future<void> deleteSubject(String uid, String subjectId) async {
+    try {
+      final subject = await getSubject(uid, subjectId);
+
+      // Unlink mirrored copies from students for staff subjects.
+      if (subject != null && subject.isStaffOwned) {
+        for (final studentId in subject.studentIds) {
+          await _deleteStudentMirror(studentId, subjectId);
+        }
+      }
+
+      final batch = _db.batch();
       final attendanceSnapshot = await _db
           .collection('users')
           .doc(uid)
           .collection('subjects')
-          .doc(subjectName)
+          .doc(subjectId)
           .collection('attendance')
           .get();
-
       for (var doc in attendanceSnapshot.docs) {
         batch.delete(doc.reference);
       }
-
-      // Delete the subject itself
       batch.delete(
-        _db
-            .collection('users')
-            .doc(uid)
-            .collection('subjects')
-            .doc(subjectName),
+        _db.collection('users').doc(uid).collection('subjects').doc(subjectId),
       );
-
       await batch.commit();
     } catch (e) {
       debugPrint('Error deleting subject: $e');
@@ -64,69 +103,156 @@ class FirestoreService {
     }
   }
 
+  Future<void> _deleteStudentMirror(String studentId, String subjectId) async {
+    try {
+      await _db
+          .collection('users')
+          .doc(studentId)
+          .collection('subjects')
+          .doc(subjectId)
+          .delete();
+    } catch (e) {
+      debugPrint('Error removing student mirror: $e');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Roster — add / remove students by email
+  // ---------------------------------------------------------------------------
+
+  Future<Map<String, dynamic>?> findUserByEmail(String email) async {
+    final snapshot = await _db
+        .collection('users')
+        .where('email', isEqualTo: email.trim().toLowerCase())
+        .limit(1)
+        .get();
+    if (snapshot.docs.isEmpty) {
+      // Some accounts may have a non-normalized email; try a raw match too.
+      final raw = await _db
+          .collection('users')
+          .where('email', isEqualTo: email.trim())
+          .limit(1)
+          .get();
+      if (raw.docs.isEmpty) return null;
+      final d = raw.docs.first;
+      return {'id': d.id, ...d.data()};
+    }
+    final d = snapshot.docs.first;
+    return {'id': d.id, ...d.data()};
+  }
+
+  /// Add a student (by email) to a staff subject and mirror the subject into
+  /// the student's subjects subcollection so their attendance pipeline works.
+  Future<AddStudentResult> addStudentToStaffSubjectByEmail(
+    Subject staffSubject,
+    String email,
+  ) async {
+    try {
+      final user = await findUserByEmail(email);
+      if (user == null) return AddStudentResult.notFound;
+      final studentId = user['id'] as String;
+      if ((user['role'] ?? 'student') != 'student') {
+        return AddStudentResult.notAStudent;
+      }
+      if (studentId == staffSubject.createdBy) return AddStudentResult.isSelf;
+      if (staffSubject.studentIds.contains(studentId)) {
+        return AddStudentResult.alreadyAdded;
+      }
+
+      // 1. Add to staff subject roster.
+      await _db
+          .collection('users')
+          .doc(staffSubject.createdBy)
+          .collection('subjects')
+          .doc(staffSubject.id)
+          .update({
+        'studentIds': FieldValue.arrayUnion([studentId]),
+      });
+
+      // 2. Mirror the subject into the student's collection (doc id = staff
+      //    subject id) so attendance/analytics read it like any other subject.
+      final mirror = staffSubject.toMap();
+      mirror['ownerRole'] = 'student';
+      mirror['linkedStaffId'] = staffSubject.createdBy;
+      mirror['linkedStaffSubjectId'] = staffSubject.id;
+      mirror['studentIds'] = <String>[]; // student copy doesn't carry a roster
+      await _db
+          .collection('users')
+          .doc(studentId)
+          .collection('subjects')
+          .doc(staffSubject.id)
+          .set(mirror, SetOptions(merge: true));
+
+      return AddStudentResult.added;
+    } catch (e) {
+      debugPrint('Error adding student by email: $e');
+      return AddStudentResult.error;
+    }
+  }
+
+  Future<void> removeStudentFromStaffSubject(
+    Subject staffSubject,
+    String studentId,
+  ) async {
+    await _db
+        .collection('users')
+        .doc(staffSubject.createdBy)
+        .collection('subjects')
+        .doc(staffSubject.id)
+        .update({
+      'studentIds': FieldValue.arrayRemove([studentId]),
+    });
+    await _deleteStudentMirror(studentId, staffSubject.id);
+  }
+
+  Future<List<Map<String, dynamic>>> getRosterStudents(
+    List<String> studentIds,
+  ) async {
+    final List<Map<String, dynamic>> result = [];
+    for (final id in studentIds) {
+      final doc = await _db.collection('users').doc(id).get();
+      if (doc.exists) {
+        result.add({'id': id, ...doc.data()!});
+      }
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Attendance
+  // ---------------------------------------------------------------------------
+
   Future<void> markAttendance(
     String uid,
-    String subjectName,
+    String subjectId,
     Attendance attendance,
   ) async {
-    final firestore = FirebaseFirestore.instance;
-
-    // Normalize subject name to keep consistent keys
-    final normalizedSubjectName = subjectName;
-
-    // Get student document to check assigned faculty
-    final userDoc = await firestore.collection('users').doc(uid).get();
-    final assignedFacultyMap = userDoc.data()?['assignedFaculty'] ?? {};
-    final assignedFacultyId = assignedFacultyMap[normalizedSubjectName];
-
     final dayOnly = DateTime(
       attendance.date.year,
       attendance.date.month,
       attendance.date.day,
     );
-    final docId =
-        '${dayOnly.millisecondsSinceEpoch}_${attendance.sessionNumber}'; // unique per session
-
-    if (assignedFacultyId != null && assignedFacultyId.isNotEmpty) {
-      // Create an attendance request for staff approval
-      await firestore.collection('attendanceRequests').add({
-        'studentId': uid,
-        'studentName':
-            userDoc.data()?['name'] ?? '', // optionally add student name
-        'staffId': assignedFacultyId,
-        'subjectId': normalizedSubjectName, // or subject ID if using it
-        'subjectName': subjectName,
-        'date': attendance.date,
-        'sessionNumber': attendance.sessionNumber,
-        'attendanceStatus': attendance.status.name,
-        'status': 'pending', // request is pending approval
-        'requestedAt': FieldValue.serverTimestamp(),
-      });
-    } else {
-      // No assigned faculty, mark attendance directly
-      final docRef = firestore
-          .collection('users')
-          .doc(uid)
-          .collection('subjects')
-          .doc(normalizedSubjectName)
-          .collection('attendance')
-          .doc(docId);
-
-      await docRef.set(attendance.toMap());
-    }
+    final docId = '${dayOnly.millisecondsSinceEpoch}_${attendance.sessionNumber}';
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('subjects')
+        .doc(subjectId)
+        .collection('attendance')
+        .doc(docId)
+        .set(attendance.toMap());
   }
 
-  Future<List<Attendance>> getAttendance(String uid, String subjectName) async {
+  Future<List<Attendance>> getAttendance(String uid, String subjectId) async {
     try {
       final snapshot = await _db
           .collection('users')
           .doc(uid)
           .collection('subjects')
-          .doc(subjectName)
+          .doc(subjectId)
           .collection('attendance')
           .orderBy('date', descending: true)
           .get();
-
       return snapshot.docs
           .map((doc) => Attendance.fromMap(doc.data(), doc.id))
           .toList();
@@ -138,41 +264,30 @@ class FirestoreService {
 
   Future<AttendanceStats> getAttendanceStats(
     String uid,
-    String subjectName, {
+    String subjectId, {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
     try {
-      final attendanceList = await getAttendance(uid, subjectName);
+      final attendanceList = await getAttendance(uid, subjectId);
 
       var filteredList = attendanceList;
       if (startDate != null && endDate != null) {
-        // Normalize constraints to start of day and end of day
         final start = DateTime(startDate.year, startDate.month, startDate.day);
-        final end = DateTime(
-          endDate.year,
-          endDate.month,
-          endDate.day,
-          23,
-          59,
-          59,
-        );
-
+        final end =
+            DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59);
         filteredList = attendanceList.where((a) {
-          return a.date.isAfter(
-                start.subtract(const Duration(milliseconds: 1)),
-              ) &&
+          return a.date
+                  .isAfter(start.subtract(const Duration(milliseconds: 1))) &&
               a.date.isBefore(end.add(const Duration(milliseconds: 1)));
         }).toList();
       }
 
       int totalClasses = filteredList.length;
-      int presentCount = filteredList
-          .where((a) => a.status == AttendanceStatus.present)
-          .length;
-      int absentCount = filteredList
-          .where((a) => a.status == AttendanceStatus.absent)
-          .length;
+      int presentCount =
+          filteredList.where((a) => a.status == AttendanceStatus.present).length;
+      int absentCount =
+          filteredList.where((a) => a.status == AttendanceStatus.absent).length;
       int cancelledCount = filteredList
           .where((a) => a.status == AttendanceStatus.cancelled)
           .length;
@@ -194,99 +309,11 @@ class FirestoreService {
     }
   }
 
-  Future<Attendance?> getTodayAttendance(String uid, String subjectName) async {
-    try {
-      final today = DateTime.now();
-      final dateOnly = DateTime(today.year, today.month, today.day);
-
-      final doc = await _db
-          .collection('users')
-          .doc(uid)
-          .collection('subjects')
-          .doc(subjectName)
-          .collection('attendance')
-          .doc(dateOnly.millisecondsSinceEpoch.toString())
-          .get();
-
-      if (doc.exists) {
-        return Attendance.fromMap(doc.data()!, doc.id);
-      }
-      return null;
-    } catch (e) {
-      debugPrint('Error getting today\'s attendance: $e');
-      return null;
-    }
-  }
-
-  // Session scheduling for staff
-  Future<void> saveSessionSchedule(
-    String staffId,
-    String classId,
-    String subjectName,
-    DateTime date,
-    int numberOfSessions,
-    Map<int, String> sessionTopics,
-  ) async {
-    try {
-      final dateOnly = DateTime(date.year, date.month, date.day);
-      final docId = '${dateOnly.millisecondsSinceEpoch}';
-
-      await _db
-          .collection('users')
-          .doc(staffId)
-          .collection('classes')
-          .doc(classId)
-          .collection('schedules')
-          .doc(docId)
-          .set({
-            'staffId': staffId,
-            'classId': classId,
-            'subjectName': subjectName,
-            'date': dateOnly,
-            'numberOfSessions': numberOfSessions,
-            'sessionTopics': sessionTopics.map(
-              (k, v) => MapEntry(k.toString(), v),
-            ),
-            'createdAt': FieldValue.serverTimestamp(),
-          });
-    } catch (e) {
-      debugPrint('Error saving session schedule: $e');
-      rethrow;
-    }
-  }
-
-  Future<Map<String, dynamic>?> getSessionSchedule(
-    String staffId,
-    String classId,
-    DateTime date,
-  ) async {
-    try {
-      final dateOnly = DateTime(date.year, date.month, date.day);
-      final docId = '${dateOnly.millisecondsSinceEpoch}';
-
-      final doc = await _db
-          .collection('users')
-          .doc(staffId)
-          .collection('classes')
-          .doc(classId)
-          .collection('schedules')
-          .doc(docId)
-          .get();
-
-      if (doc.exists) {
-        return doc.data();
-      }
-      return null;
-    } catch (e) {
-      debugPrint('Error getting session schedule: $e');
-      return null;
-    }
-  }
-
-  // Mark attendance for past dates
+  /// Mark attendance for any date. [subjectId] is used directly as the document
+  /// id (no normalization), keeping personal and staff-linked subjects aligned.
   Future<void> markAttendanceForPastDate(
     String uid,
-    String subjectName,
+    String subjectId,
     DateTime date,
     int sessionNumber,
     AttendanceStatus status,
@@ -295,21 +322,19 @@ class FirestoreService {
     try {
       final dateOnly = DateTime(date.year, date.month, date.day);
       final docId = '${dateOnly.millisecondsSinceEpoch}_$sessionNumber';
-
       final attendance = Attendance(
         id: docId,
-        subjectId: subjectName,
+        subjectId: subjectId,
         date: dateOnly,
         status: status,
         sessionNumber: sessionNumber,
         topic: topic,
       );
-
       await _db
           .collection('users')
           .doc(uid)
           .collection('subjects')
-          .doc(subjectName.trim().toLowerCase())
+          .doc(subjectId)
           .collection('attendance')
           .doc(docId)
           .set(attendance.toMap());
@@ -319,231 +344,204 @@ class FirestoreService {
     }
   }
 
-  // Auto-mark absent for students who didn't send requests
-  Future<void> autoMarkAbsentForMissedRequests(
-    String staffId,
-    String classId,
-    String subjectName,
-    DateTime date,
-  ) async {
-    try {
-      // Get session schedule for the date
-      final schedule = await getSessionSchedule(staffId, classId, date);
-      if (schedule == null) return;
+  // ---------------------------------------------------------------------------
+  // Day plans (per taught day: topic + notes)
+  // ---------------------------------------------------------------------------
 
-      final numberOfSessions = schedule['numberOfSessions'] as int? ?? 0;
-      if (numberOfSessions == 0) return;
-
-      // Get all students in the class
-      final classDoc = await _db
-          .collection('users')
-          .doc(staffId)
-          .collection('classes')
-          .doc(classId)
-          .get();
-
-      final studentIds = List<String>.from(
-        classDoc.data()?['studentIds'] ?? [],
-      );
-
-      final dateOnly = DateTime(date.year, date.month, date.day);
-
-      // For each student, check if they sent attendance requests
-      for (var studentId in studentIds) {
-        for (int session = 1; session <= numberOfSessions; session++) {
-          // Check if there's a pending or approved request
-          final requestSnapshot = await _db
-              .collection('attendanceRequests')
-              .where('studentId', isEqualTo: studentId)
-              .where('staffId', isEqualTo: staffId)
-              .where('subjectName', isEqualTo: subjectName)
-              .where('date', isEqualTo: dateOnly)
-              .where('sessionNumber', isEqualTo: session)
-              .get();
-
-          // If no request found, mark as absent
-          if (requestSnapshot.docs.isEmpty) {
-            final topicsData =
-                schedule['sessionTopics'] as Map<dynamic, dynamic>? ?? {};
-            final topic = topicsData[session.toString()]?.toString();
-
-            await markAttendanceForPastDate(
-              studentId,
-              subjectName,
-              dateOnly,
-              session,
-              AttendanceStatus.absent,
-              topic,
-            );
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Error auto-marking absences: $e');
-      rethrow;
-    }
-  }
-
-  // GLOBAL SUBJECTS & REQUESTS
-
-  // Create a global subject (Staff only) - Returns the new Subject ID
-  Future<String> createGlobalSubject(Subject subject) async {
-    try {
-      final docRef = await _db.collection('subjects').add(subject.toMap());
-      return docRef.id;
-    } catch (e) {
-      debugPrint('Error creating global subject: $e');
-      rethrow;
-    }
-  }
-
-  // Search global subjects
-  Future<List<Subject>> searchGlobalSubjects(String query) async {
-    try {
-      // Simple prefix search
-      final snapshot = await _db
-          .collection('subjects')
-          .where('name', isGreaterThanOrEqualTo: query)
-          .where('name', isLessThan: '${query}z')
-          .get();
-
-      return snapshot.docs
-          .map((doc) => Subject.fromMap(doc.data(), doc.id))
-          .toList();
-    } catch (e) {
-      debugPrint('Error searching subjects: $e');
-      return [];
-    }
-  }
-
-  // Request to join a global subject
-  Future<void> requestToJoinSubject(
-    String studentId,
-    String studentName,
+  CollectionReference<Map<String, dynamic>> _dayPlans(
+    String ownerId,
     String subjectId,
-    String subjectName,
+  ) =>
+      _db
+          .collection('users')
+          .doc(ownerId)
+          .collection('subjects')
+          .doc(subjectId)
+          .collection('dayPlans');
+
+  Future<void> setDayPlan(
+    String ownerId,
+    String subjectId,
+    DayPlan plan,
   ) async {
-    // Deprecated or basic version
-    await requestToJoinSubjectWithOwner(
-      studentId,
-      studentName,
-      Subject(id: subjectId, name: subjectName), // Minimal subject
-    );
+    await _dayPlans(ownerId, subjectId).doc(plan.id).set(plan.toMap());
   }
 
-  // Detailed Request to join
-  Future<void> requestToJoinSubjectWithOwner(
-    String studentId,
-    String studentName,
-    Subject subject,
-  ) async {
-    try {
-      await _db.collection('joinRequests').add({
-        'studentId': studentId,
-        'studentName': studentName,
-        'subjectId': subject.id,
-        'subjectName': subject.name,
-        'ownerId': subject.createdBy, // Staff ID
-        'department': subject.department, // For matching
-        'studentClass': subject.section, // For matching
-        'status': 'pending',
-        'requestedAt': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      debugPrint('Error requesting to join: $e');
-      rethrow;
-    }
+  Stream<List<DayPlan>> streamDayPlans(String ownerId, String subjectId) {
+    return _dayPlans(ownerId, subjectId)
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map((s) =>
+            s.docs.map((d) => DayPlan.fromMap(d.data(), d.id)).toList());
   }
 
-  // Fetch requests for staff
-  Stream<QuerySnapshot> getStaffJoinRequests(String staffId) {
-    return _db
-        .collection('joinRequests')
-        .where('ownerId', isEqualTo: staffId)
-        .where('status', isEqualTo: 'pending')
-        .snapshots();
+  Future<List<DayPlan>> getDayPlans(String ownerId, String subjectId) async {
+    final s = await _dayPlans(ownerId, subjectId).orderBy('date').get();
+    return s.docs.map((d) => DayPlan.fromMap(d.data(), d.id)).toList();
   }
 
-  // Approve join request
-  Future<void> approveJoinRequest(
-    String requestId,
-    String studentId,
-    Subject globalSubject,
+  Future<void> deleteDayPlan(
+    String ownerId,
+    String subjectId,
+    String dayId,
   ) async {
-    try {
-      final batch = _db.batch();
+    await _dayPlans(ownerId, subjectId).doc(dayId).delete();
+  }
 
-      // 1. Update request status
-      final requestRef = _db.collection('joinRequests').doc(requestId);
-      batch.update(requestRef, {'status': 'approved'});
+  // ---------------------------------------------------------------------------
+  // Collapsible content sections
+  // ---------------------------------------------------------------------------
 
-      // 2. Add subject to student's local list
-      // Use Normalized Name or Global ID?
-      // Since 'markAttendance' uses name, we stick to that for now for compatibility.
-      final docId = globalSubject.name.trim().toLowerCase();
-      final studentSubjectRef = _db
+  CollectionReference<Map<String, dynamic>> _sections(
+    String ownerId,
+    String subjectId,
+  ) =>
+      _db
+          .collection('users')
+          .doc(ownerId)
+          .collection('subjects')
+          .doc(subjectId)
+          .collection('sections');
+
+  Future<void> upsertSection(
+    String ownerId,
+    String subjectId,
+    SubjectSection section,
+  ) async {
+    final ref = section.id.isEmpty
+        ? _sections(ownerId, subjectId).doc()
+        : _sections(ownerId, subjectId).doc(section.id);
+    await ref.set(section.toMap(), SetOptions(merge: true));
+  }
+
+  Stream<List<SubjectSection>> streamSections(String ownerId, String subjectId) {
+    return _sections(ownerId, subjectId)
+        .orderBy('order')
+        .snapshots()
+        .map((s) =>
+            s.docs.map((d) => SubjectSection.fromMap(d.data(), d.id)).toList());
+  }
+
+  Future<void> deleteSection(
+    String ownerId,
+    String subjectId,
+    String sectionId,
+  ) async {
+    await _sections(ownerId, subjectId).doc(sectionId).delete();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Course Guide
+  // ---------------------------------------------------------------------------
+
+  DocumentReference<Map<String, dynamic>> _guideDoc(
+    String ownerId,
+    String subjectId,
+  ) =>
+      _db
+          .collection('users')
+          .doc(ownerId)
+          .collection('subjects')
+          .doc(subjectId)
+          .collection('guide')
+          .doc('current');
+
+  Future<void> saveGuide(
+    String ownerId,
+    String subjectId,
+    CourseGuide guide,
+  ) async {
+    await _guideDoc(ownerId, subjectId).set(guide.toMap());
+  }
+
+  Stream<CourseGuide?> streamGuide(String ownerId, String subjectId) {
+    return _guideDoc(ownerId, subjectId).snapshots().map(
+          (doc) => doc.exists ? CourseGuide.fromMap(doc.data()!) : null,
+        );
+  }
+
+  Future<CourseGuide?> getGuide(String ownerId, String subjectId) async {
+    final doc = await _guideDoc(ownerId, subjectId).get();
+    return doc.exists ? CourseGuide.fromMap(doc.data()!) : null;
+  }
+
+  /// Count, per day, how many roster students were marked absent — used to make
+  /// the Course Guide's revision days focus on poorly-attended topics.
+  Future<Map<String, int>> getRosterAbsenceByDate(
+    List<String> studentIds,
+    String subjectId,
+  ) async {
+    final Map<String, int> byDate = {};
+    for (final studentId in studentIds) {
+      final snap = await _db
           .collection('users')
           .doc(studentId)
           .collection('subjects')
-          .doc(docId);
-
-      // We might want to store the Global ID too
-      final subjectData = globalSubject.toMap();
-      subjectData['globalId'] = globalSubject.id;
-
-      // 2a. Fetch Staff Name if available (for UI display)
-      if (globalSubject.createdBy.isNotEmpty) {
-        final staffDoc = await _db
-            .collection('users')
-            .doc(globalSubject.createdBy)
-            .get();
-        if (staffDoc.exists) {
-          final staffName = staffDoc.data()?['name'] ?? 'Staff';
-          subjectData['staffName'] = staffName;
-        }
+          .doc(subjectId)
+          .collection('attendance')
+          .where('status', isEqualTo: 'absent')
+          .get();
+      for (final doc in snap.docs) {
+        final date = doc.data()['date']?.toDate();
+        if (date == null) continue;
+        final key = DayPlan.dateKey(date);
+        byDate[key] = (byDate[key] ?? 0) + 1;
       }
-
-      batch.set(studentSubjectRef, subjectData);
-
-      // 3. Add Student to Staff's Class List (if we can find it)
-      // We need to find the class document in users/{staffId}/classes
-      // that matches the subject info.
-
-      if (globalSubject.createdBy.isNotEmpty) {
-        // This requires a query, which we can't do easily in a batch unless we know the ID.
-        // So we should do the query before the batch, OR assume the UI calling this
-        // knows the classId (which StaffRequestsScreen logic tries to find).
-        // But strict separation of concerns suggested doing it here.
-        // However, without classId, we can't add to subcollection efficiently.
-        // Let's rely on the caller (StaffRequestsScreen) to do step 3
-        // OR the client can update the assignedFaculty map.
-
-        // Let's update the assignedFaculty map on the student
-        final userRef = _db.collection('users').doc(studentId);
-        // We can't use dot notation for dynamic keys in batch update easily if we don't know the exact map structure
-        // but 'assignedFaculty.SubjectName': staffId works.
-        batch.update(userRef, {
-          'assignedFaculty.${globalSubject.name}': globalSubject.createdBy,
-        });
-      }
-
-      await batch.commit();
-    } catch (e) {
-      debugPrint('Error approving request: $e');
-      rethrow;
     }
+    return byDate;
   }
 
-  // Reject join request
-  Future<void> rejectJoinRequest(String requestId) async {
-    await _db.collection('joinRequests').doc(requestId).update({
-      'status': 'rejected',
-    });
+  // ---------------------------------------------------------------------------
+  // Tests
+  // ---------------------------------------------------------------------------
+
+  CollectionReference<Map<String, dynamic>> _tests(
+    String ownerId,
+    String subjectId,
+  ) =>
+      _db
+          .collection('users')
+          .doc(ownerId)
+          .collection('subjects')
+          .doc(subjectId)
+          .collection('tests');
+
+  Future<void> upsertTest(
+    String ownerId,
+    String subjectId,
+    CourseTest test,
+  ) async {
+    final ref = test.id.isEmpty
+        ? _tests(ownerId, subjectId).doc()
+        : _tests(ownerId, subjectId).doc(test.id);
+    await ref.set(test.toMap(), SetOptions(merge: true));
   }
 
-  // AUTOMATIC ATTENDANCE METHODS
+  Stream<List<CourseTest>> streamTests(String ownerId, String subjectId) {
+    return _tests(ownerId, subjectId)
+        .orderBy('date')
+        .snapshots()
+        .map((s) =>
+            s.docs.map((d) => CourseTest.fromMap(d.data(), d.id)).toList());
+  }
 
-  // Get automatic attendance setting for user
+  Future<List<CourseTest>> getTests(String ownerId, String subjectId) async {
+    final s = await _tests(ownerId, subjectId).orderBy('date').get();
+    return s.docs.map((d) => CourseTest.fromMap(d.data(), d.id)).toList();
+  }
+
+  Future<void> deleteTest(
+    String ownerId,
+    String subjectId,
+    String testId,
+  ) async {
+    await _tests(ownerId, subjectId).doc(testId).delete();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Automatic attendance (personal subjects only)
+  // ---------------------------------------------------------------------------
+
   Future<bool> getAutoAttendanceSetting(String uid) async {
     try {
       final doc = await _db.collection('users').doc(uid).get();
@@ -554,38 +552,35 @@ class FirestoreService {
     }
   }
 
-  // Set automatic attendance setting for user
   Future<void> setAutoAttendanceSetting(String uid, bool enabled) async {
     try {
-      await _db.collection('users').doc(uid).update({
-        'autoAttendance': enabled,
-      });
+      await _db
+          .collection('users')
+          .doc(uid)
+          .update({'autoAttendance': enabled});
     } catch (e) {
       debugPrint('Error setting auto attendance: $e');
       rethrow;
     }
   }
 
-  // Check if manual attendance exists for a specific date and subject
   Future<bool> hasManualAttendanceForDate(
     String uid,
-    String subjectName,
+    String subjectId,
     DateTime date,
     int sessionNumber,
   ) async {
     try {
       final dateOnly = DateTime(date.year, date.month, date.day);
       final docId = '${dateOnly.millisecondsSinceEpoch}_$sessionNumber';
-
       final doc = await _db
           .collection('users')
           .doc(uid)
           .collection('subjects')
-          .doc(subjectName)
+          .doc(subjectId)
           .collection('attendance')
           .doc(docId)
           .get();
-
       return doc.exists;
     } catch (e) {
       debugPrint('Error checking manual attendance: $e');
@@ -593,42 +588,28 @@ class FirestoreService {
     }
   }
 
-  // Mark automatic attendance for all eligible subjects
   Future<void> markAutomaticAttendance(String uid) async {
     try {
-      // Check if auto attendance is enabled
       final isEnabled = await getAutoAttendanceSetting(uid);
       if (!isEnabled) return;
 
-      // Get current day of week
       final now = DateTime.now();
       final dayName = _getDayName(now.weekday);
-
-      // Get all subjects for the user
       final subjects = await getSubjects(uid);
 
-      // Filter personal subjects (no staff assigned) with timetable for today
+      // Only personal subjects (not shared by a staff member).
       final eligibleSubjects = subjects.where((subject) {
-        return subject.staffName.isEmpty &&
+        return !subject.isLinkedToStaff &&
             subject.timetable.containsKey(dayName) &&
             subject.timetable[dayName]! > 0;
       }).toList();
 
-      // Mark attendance for each eligible subject
       for (var subject in eligibleSubjects) {
         final classesCount = subject.timetable[dayName]!;
-
         for (int session = 1; session <= classesCount; session++) {
-          // Check if attendance already marked manually
-          final hasManual = await hasManualAttendanceForDate(
-            uid,
-            subject.id,
-            now,
-            session,
-          );
-
+          final hasManual =
+              await hasManualAttendanceForDate(uid, subject.id, now, session);
           if (!hasManual) {
-            // Mark as present automatically
             final attendance = Attendance(
               id: '',
               subjectId: subject.id,
@@ -637,7 +618,6 @@ class FirestoreService {
               sessionNumber: session,
               topic: null,
             );
-
             await markAttendance(uid, subject.id, attendance);
           }
         }
@@ -648,25 +628,16 @@ class FirestoreService {
     }
   }
 
-  // Helper method to get day name from weekday number
   String _getDayName(int weekday) {
-    switch (weekday) {
-      case 1:
-        return 'Monday';
-      case 2:
-        return 'Tuesday';
-      case 3:
-        return 'Wednesday';
-      case 4:
-        return 'Thursday';
-      case 5:
-        return 'Friday';
-      case 6:
-        return 'Saturday';
-      case 7:
-        return 'Sunday';
-      default:
-        return 'Monday';
-    }
+    const names = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    return names[(weekday - 1).clamp(0, 6)];
   }
 }

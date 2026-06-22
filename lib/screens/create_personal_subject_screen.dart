@@ -54,7 +54,8 @@ class _CreatePersonalSubjectScreenState
       final newSubject = Subject(
         id: subjectName.toLowerCase(),
         name: subjectName,
-        isGlobal: false,
+        createdBy: uid,
+        ownerRole: 'student',
         timetable: _timetable,
       );
 

@@ -5,10 +5,10 @@ import 'package:gap/gap.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/subject_model.dart';
 import '../core/theme/app_spacing.dart';
+import '../core/theme/app_theme.dart';
 import '../core/widgets/widgets.dart';
 import '../services/firestore_service.dart';
 import 'subject_detail_screen.dart';
-import 'student_subject_search_screen.dart'; // Added import
 import 'create_personal_subject_screen.dart';
 
 class SubjectScreen extends StatefulWidget {
@@ -64,12 +64,12 @@ class _SubjectScreenState extends State<SubjectScreen> {
         break;
       case 'Staff':
         _filteredSubjects = _subjects.where((subject) {
-          return subject.staffName.isNotEmpty;
+          return subject.isLinkedToStaff;
         }).toList();
         break;
       case 'Personal':
         _filteredSubjects = _subjects.where((subject) {
-          return subject.staffName.isEmpty;
+          return !subject.isLinkedToStaff;
         }).toList();
         break;
       case 'All subjects':
@@ -155,26 +155,11 @@ class _SubjectScreenState extends State<SubjectScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final colors = AppColors.of(context);
     final filters = ['All subjects', 'Today', 'Staff', 'Personal'];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Your Subjects"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            tooltip: 'Search Global Subjects',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const StudentSubjectSearchScreen(),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Your subjects')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addSubject,
         icon: const Icon(Icons.add_rounded),
@@ -260,7 +245,7 @@ class _SubjectScreenState extends State<SubjectScreen> {
                       itemCount: _filteredSubjects.length,
                       itemBuilder: (context, index) {
                         final subject = _filteredSubjects[index];
-                        final isStaffSubject = subject.staffName.isNotEmpty;
+                        final isStaffSubject = subject.isLinkedToStaff;
 
                         return Padding(
                           padding: const EdgeInsets.only(bottom: AppSpacing.xs),
@@ -273,8 +258,9 @@ class _SubjectScreenState extends State<SubjectScreen> {
                                   onPressed: (_) => _deleteSubject(subject),
                                   icon: Icons.delete_outline,
                                   label: 'Delete',
-                                  backgroundColor: colorScheme.errorContainer,
-                                  foregroundColor: colorScheme.onErrorContainer,
+                                  backgroundColor:
+                                      colors.danger.withValues(alpha: 0.12),
+                                  foregroundColor: colors.danger,
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ],

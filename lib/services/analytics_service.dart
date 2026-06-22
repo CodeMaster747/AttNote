@@ -125,29 +125,17 @@ class AnalyticsService {
     }
   }
 
-  /// Get topic revision suggestions based on absence patterns
-  /// Returns top 3 topics/dates with highest absences
+  /// Get topic revision suggestions based on absence patterns.
+  /// Returns top 3 topics/dates with highest absences across the roster.
+  ///
+  /// [subjectId] is the staff subject's id — the same id that mirrored student
+  /// copies use as their document id.
   Future<List<TopicRevisionSuggestion>> getTopicRevisionSuggestions(
-    String staffId,
-    String classId,
+    List<String> studentIds,
+    String subjectId,
     String subjectName,
   ) async {
     try {
-      // Get all students in this class
-      final classDoc = await _db
-          .collection('users')
-          .doc(staffId)
-          .collection('classes')
-          .doc(classId)
-          .get();
-
-      if (!classDoc.exists) {
-        return [];
-      }
-
-      final studentIds = List<String>.from(
-        classDoc.data()?['studentIds'] ?? [],
-      );
       if (studentIds.isEmpty) {
         return [];
       }
@@ -161,7 +149,7 @@ class AnalyticsService {
             .collection('users')
             .doc(studentId)
             .collection('subjects')
-            .doc(subjectName.trim().toLowerCase())
+            .doc(subjectId)
             .collection('attendance')
             .where('status', isEqualTo: 'absent')
             .get();

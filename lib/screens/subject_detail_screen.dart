@@ -1,12 +1,19 @@
 // screens/subject_detail_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Needed for Firestore queries
+import 'package:gap/gap.dart';
+import 'package:intl/intl.dart';
+
+import '../core/theme/app_spacing.dart';
+import '../core/theme/app_theme.dart';
+import '../core/widgets/widgets.dart';
 import '../models/subject_model.dart';
 import '../models/attendance_model.dart';
+import '../models/course_model.dart';
 import '../services/firestore_service.dart';
+import '../services/attendance_prediction_service.dart';
 import 'attendance_screen.dart';
+import 'course_guide_screen.dart';
 import 'student_mark_past_attendance_screen.dart';
 
 class SubjectDetailScreen extends StatefulWidget {
@@ -20,119 +27,48 @@ class SubjectDetailScreen extends StatefulWidget {
 
 class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final AttendancePredictionService _prediction = AttendancePredictionService();
   final String uid = FirebaseAuth.instance.currentUser!.uid;
 
   AttendanceStats? _stats;
+  AttendanceRisk? _risk;
   bool _isLoading = true;
-  AttendancePart? _selectedPart; // Selected attendance part (e.g. Term 1)
+  AttendancePart? _selectedPart;
 
-  int _numberOfSessions = 1; // How many classes today
-  final Map<int, AttendanceStatus> _sessionAttendance =
-      {}; // session number → status
+  int _numberOfSessions = 1;
+  final Map<int, AttendanceStatus> _sessionAttendance = {};
   bool _isSavingAttendance = false;
 
-  List<String> _assignedFacultyNames = [];
-  bool _isLoadingFaculty = true;
+  bool get _isShared => widget.subject.isLinkedToStaff;
+  String get _contentOwnerId =>
+      _isShared ? widget.subject.linkedStaffId : uid;
+  String get _contentSubjectId =>
+      _isShared ? widget.subject.linkedStaffSubjectId : widget.subject.id;
 
   @override
   void initState() {
     super.initState();
     _determineCurrentPart();
     _loadData();
-    _loadAssignedFacultyNames();
   }
 
   void _determineCurrentPart() {
     if (widget.subject.attendanceParts.isEmpty) return;
-
     final now = DateTime.now();
-    // Default to first part
     AttendancePart current = widget.subject.attendanceParts.first;
-
-    // Find part that includes today
     for (var part in widget.subject.attendanceParts) {
       if (now.isAfter(part.startDate.subtract(const Duration(days: 1))) &&
           now.isBefore(part.endDate.add(const Duration(days: 1)))) {
         current = part;
         break;
       }
-      // Or find the latest part that has started?
-      // If we are past 'Term 1' end date, we should probably default to 'Term 2' even if 'Term 2' hasn't strictly started?
-      // Requirement: "after first 10 days are over, for cat2 the attendance will be restarted".
-      // Implies sequential flow.
-      if (now.isAfter(part.startDate)) {
-        current = part;
-      }
+      if (now.isAfter(part.startDate)) current = part;
     }
     _selectedPart = current;
   }
 
-  Future<void> _loadAssignedFacultyNames() async {
-    // 0. Check if staff name is already available in the Subject object
-    if (widget.subject.staffName.isNotEmpty) {
-      if (mounted) {
-        setState(() {
-          _assignedFacultyNames = [widget.subject.staffName];
-          _isLoadingFaculty = false;
-        });
-      }
-      return;
-    }
-
-    setState(() {
-      _isLoadingFaculty = true;
-    });
-
-    try {
-      // 1. Get the current student/user document
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid) // current user
-          .get();
-      final data = userDoc.data() ?? {};
-      final assignedFacultyMap = data['assignedFaculty'] ?? {};
-
-      // 2. Normalize subject name
-      final normalizedSubjectName = widget.subject.name.trim().toLowerCase();
-
-      // 3. Find all staff IDs assigned for this subject
-      // Support multiple faculties per subject by mapping the value to a list if needed.
-      var staffIds = [];
-      final assignedStaff = assignedFacultyMap[normalizedSubjectName];
-      if (assignedStaff is List) {
-        staffIds = assignedStaff;
-      } else if (assignedStaff is String) {
-        staffIds = [assignedStaff];
-      }
-
-      // Fetch staff names
-      List<String> facultyNames = [];
-      for (final staffId in staffIds) {
-        final staffDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(staffId)
-            .get();
-        if (staffDoc.exists) {
-          facultyNames.add(staffDoc.data()?['name'] ?? staffId);
-        }
-      }
-
-      setState(() {
-        _assignedFacultyNames = facultyNames;
-        _isLoadingFaculty = false;
-      });
-    } catch (e) {
-      setState(() {
-        _assignedFacultyNames = [];
-        _isLoadingFaculty = false;
-      });
-    }
-  }
-
   Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
     try {
       final stats = await _firestoreService.getAttendanceStats(
         uid,
@@ -140,62 +76,77 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         startDate: _selectedPart?.startDate,
         endDate: _selectedPart?.endDate,
       );
+      final risk = await _prediction.computeRisk(uid, widget.subject);
       if (!mounted) return;
       setState(() {
         _stats = stats;
+        _risk = risk;
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load attendance data: $e')),
       );
     }
   }
 
-  Widget _buildStatColumn(String label, String value, {Color? color}) {
-    final theme = Theme.of(context);
-    return Column(
-      children: [
-        Text(
-          value,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: color,
+  Future<void> _saveAttendance() async {
+    if (_sessionAttendance.length < _numberOfSessions) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select attendance for all classes')),
+      );
+      return;
+    }
+    setState(() => _isSavingAttendance = true);
+    final now = DateTime.now();
+    final dayOnly = DateTime(now.year, now.month, now.day);
+    try {
+      for (int session = 1; session <= _numberOfSessions; session++) {
+        final status = _sessionAttendance[session] ?? AttendanceStatus.absent;
+        await _firestoreService.markAttendance(
+          uid,
+          widget.subject.id,
+          Attendance(
+            id: '',
+            subjectId: widget.subject.id,
+            date: dayOnly,
+            status: status,
+            sessionNumber: session,
           ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
+        );
+      }
+      await _loadData();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Attendance updated')));
+      setState(() {
+        _sessionAttendance.clear();
+        _numberOfSessions = 1;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+    } finally {
+      if (mounted) setState(() => _isSavingAttendance = false);
+    }
   }
 
-  Color getStatusColor(AttendanceStatus status) {
-    final colorScheme = Theme.of(context).colorScheme;
-    switch (status) {
-      case AttendanceStatus.present:
-        return colorScheme.tertiaryContainer;
-      case AttendanceStatus.absent:
-        return colorScheme.errorContainer;
-      case AttendanceStatus.cancelled:
-        return colorScheme.secondaryContainer;
-    }
+  Color _percentColor(AppColors colors, double pct) {
+    if (pct >= 75) return colors.success;
+    if (pct >= 50) return colors.warning;
+    return colors.danger;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colors = AppColors.of(context);
 
     return Scaffold(
+      backgroundColor: colors.background,
       appBar: AppBar(
         title: Text(widget.subject.name),
         actions: [
@@ -203,572 +154,549 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
             DropdownButtonHideUnderline(
               child: DropdownButton<AttendancePart>(
                 value: _selectedPart,
-                dropdownColor: colorScheme.surface,
-                iconEnabledColor: colorScheme.onSurface,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colorScheme.onSurface,
-                ),
-                items: widget.subject.attendanceParts.map((part) {
-                  return DropdownMenuItem(value: part, child: Text(part.name));
-                }).toList(),
+                items: widget.subject.attendanceParts
+                    .map((p) =>
+                        DropdownMenuItem(value: p, child: Text(p.name)))
+                    .toList(),
                 onChanged: (part) {
                   if (part != null) {
-                    setState(() {
-                      _selectedPart = part;
-                      _loadData(); // Reload stats for new part
-                    });
+                    setState(() => _selectedPart = part);
+                    _loadData();
                   }
                 },
               ),
             ),
-          const SizedBox(width: 8),
+          const Gap(AppSpacing.xs),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          : RefreshIndicator(
+              onRefresh: _loadData,
+              child: ListView(
+                padding: AppSpacing.pagePadding,
                 children: [
-                  // Attendance Stats Card
-                  Card(
-                    elevation: 0,
-                    color: colorScheme.surfaceContainerLow,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  if (widget.subject.staffName.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: Row(
                         children: [
-                          Text(
-                            'Attendance Overview',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                          Icon(Icons.person_outline,
+                              size: 14, color: colors.textTertiary),
+                          const Gap(AppSpacing.xxs),
+                          Text(widget.subject.staffName,
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(color: colors.textSecondary)),
+                        ],
+                      ),
+                    ),
+
+                  if (_risk != null && _risk!.hasData && _risk!.level != RiskLevel.safe) ...[
+                    _buildRiskBanner(theme, colors, _risk!),
+                    const Gap(AppSpacing.md),
+                  ],
+
+                  _buildOverviewCard(theme, colors),
+                  const Gap(AppSpacing.md),
+                  _buildTodayCard(theme, colors),
+                  const Gap(AppSpacing.md),
+
+                  // History action
+                  AppCard(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AttendanceScreen(subject: widget.subject),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_month_outlined,
+                            size: 18, color: colors.textSecondary),
+                        const Gap(AppSpacing.sm),
+                        Expanded(
+                          child: Text('Attendance history',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: colors.textPrimary,
+                              )),
+                        ),
+                        Icon(Icons.arrow_forward_rounded,
+                            size: 16, color: colors.textTertiary),
+                      ],
+                    ),
+                  ),
+
+                  if (_isShared && widget.subject.courseGuideEnabled) ...[
+                    const Gap(AppSpacing.md),
+                    AppCard(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CourseGuideScreen(
+                            subject: widget.subject,
+                            readOnly: true,
                           ),
-                          if (_selectedPart != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              _selectedPart!.name,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                          if (_stats != null) ...[
-                            Row(
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.auto_awesome_outlined,
+                              size: 18, color: colors.textSecondary),
+                          const Gap(AppSpacing.sm),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Circular percentage indicator
-                                SizedBox(
-                                  width: 72,
-                                  height: 72,
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      CircularProgressIndicator(
-                                        value:
-                                            (_stats!.attendancePercentage / 100)
-                                                .clamp(0, 1),
-                                        strokeWidth: 6,
-                                        backgroundColor:
-                                            colorScheme.surfaceContainerHighest,
-                                        color:
-                                            _stats!.attendancePercentage >= 75
-                                            ? colorScheme.tertiary
-                                            : _stats!.attendancePercentage >= 50
-                                            ? colorScheme.secondary
-                                            : colorScheme.error,
-                                      ),
-                                      Text(
-                                        '${_stats!.attendancePercentage.toStringAsFixed(0)}%',
-                                        style: theme.textTheme.titleSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 24),
-                                Expanded(
-                                  child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceAround,
-                                    children: [
-                                      _buildStatColumn(
-                                        'Total',
-                                        _stats!.totalClasses.toString(),
-                                        color: colorScheme.primary,
-                                      ),
-                                      _buildStatColumn(
-                                        'Present',
-                                        _stats!.presentCount.toString(),
-                                        color: colorScheme.tertiary,
-                                      ),
-                                      _buildStatColumn(
-                                        'Absent',
-                                        _stats!.absentCount.toString(),
-                                        color: colorScheme.error,
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                Text('Course Guide',
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.textPrimary,
+                                    )),
+                                Text('Teaching plan, prerequisites & resources',
+                                    style: theme.textTheme.bodySmall
+                                        ?.copyWith(color: colors.textTertiary)),
                               ],
                             ),
-                          ] else
-                            Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Text(
-                                'No attendance data available',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
+                          ),
+                          Icon(Icons.arrow_forward_rounded,
+                              size: 16, color: colors.textTertiary),
                         ],
                       ),
                     ),
-                  ),
+                  ],
 
-                  const SizedBox(height: 16),
+                  if (_isShared) ...[
+                    const Gap(AppSpacing.lg),
+                    SectionHeader(
+                      title: 'Course content',
+                      subtitle: 'Shared by ${widget.subject.staffName.isEmpty ? 'your staff' : widget.subject.staffName}',
+                    ),
+                    const Gap(AppSpacing.sm),
+                    _buildContentRows(theme, colors),
+                  ],
+                  const Gap(AppSpacing.lg),
+                ],
+              ),
+            ),
+    );
+  }
 
-                  // Action Buttons Row
-                  Row(
+  Widget _buildRiskBanner(ThemeData theme, AppColors colors, AttendanceRisk r) {
+    final below = r.level == RiskLevel.below;
+    final c = below ? colors.danger : colors.warning;
+    final String message;
+    if (below) {
+      message = r.classesToRecover > 0
+          ? 'Below 75%. Attend the next ${r.classesToRecover} class'
+              '${r.classesToRecover == 1 ? '' : 'es'} to recover.'
+          : 'Just below 75% — attend the next class to recover.';
+    } else if (r.projectedBelowDate != null) {
+      message =
+          'At risk: may dip below 75% around ${DateFormat('d MMM').format(r.projectedBelowDate!)}. '
+          'You can miss ${r.missableClasses} more.';
+    } else {
+      message =
+          'At risk: only ${r.missableClasses} more class'
+          '${r.missableClasses == 1 ? '' : 'es'} can be missed.';
+    }
+
+    return Container(
+      padding: AppSpacing.cardPadding,
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: c.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(below ? Icons.error_outline : Icons.warning_amber_outlined,
+              size: 18, color: c),
+          const Gap(AppSpacing.sm),
+          Expanded(
+            child: Text(message,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.textPrimary,
+                  fontWeight: FontWeight.w500,
+                )),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewCard(ThemeData theme, AppColors colors) {
+    final stats = _stats;
+    final pct = stats?.attendancePercentage ?? 0;
+    final pctColor = _percentColor(colors, pct);
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Attendance overview',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colors.textPrimary,
+              )),
+          if (_selectedPart != null) ...[
+            const Gap(2),
+            Text(_selectedPart!.name,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: colors.textTertiary)),
+          ],
+          const Gap(AppSpacing.md),
+          if (stats == null || stats.totalClasses == 0)
+            Text('No attendance data yet.',
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(color: colors.textTertiary))
+          else
+            Row(
+              children: [
+                SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      /* Expanded(
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.person_add),
-                          label: const Text('Add Staff'),
-                          onPressed: _showAddStaffDialog,
-                        ),
-                      ), */
-                      if (_assignedFacultyNames.isEmpty) ...[
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton.icon(
-                            icon: const Icon(Icons.edit_calendar),
-                            label: const Text('Past Attendance'),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      StudentMarkPastAttendanceScreen(
-                                        subject: widget.subject,
-                                      ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
+                      CircularProgressIndicator(
+                        value: (pct / 100).clamp(0, 1),
+                        strokeWidth: 6,
+                        backgroundColor: colors.surfaceMuted,
+                        valueColor: AlwaysStoppedAnimation(pctColor),
+                      ),
+                      Text('${pct.toStringAsFixed(0)}%',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: colors.textPrimary,
+                          )),
                     ],
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ...inside the children[] before/after Add Staff button:
-                  if (_isLoadingFaculty)
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        'Loading faculty...',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    )
-                  else if (_assignedFacultyNames.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        'No staff assigned yet.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    )
-                  else
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          // "Faculty:" a bit lower to align with Chip(s)
-                          Transform.translate(
-                            offset: const Offset(
-                              0,
-                              1,
-                            ), // Tune this value for your app!
-                            child: const Text(
-                              'Faculty:',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          // Expanded to allow chips to wrap nicely
-                          Expanded(
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 4,
-                              children: _assignedFacultyNames
-                                  .map((name) => Chip(label: Text(name)))
-                                  .toList(),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 16),
-
-                  // Today's Attendance Card
-                  Card(
-                    elevation: 0,
-                    color: colorScheme.surfaceContainerLow,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "Today's Attendance",
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          // Show info if staff is assigned
-                          if (_assignedFacultyNames.isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: colorScheme.primaryContainer,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.info_outline,
-                                    color: colorScheme.onPrimaryContainer,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Number of sessions is set by your assigned staff',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color:
-                                                colorScheme.onPrimaryContainer,
-                                          ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              const Text("Number of classes today: "),
-                              DropdownButton<int>(
-                                value: _numberOfSessions,
-                                items: List.generate(10, (index) => index + 1)
-                                    .map(
-                                      (sessionCount) => DropdownMenuItem<int>(
-                                        value: sessionCount,
-                                        child: Text(sessionCount.toString()),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: _assignedFacultyNames.isNotEmpty
-                                    ? null // Disable if staff is assigned
-                                    : (val) {
-                                        if (val == null) return;
-                                        setState(() {
-                                          _numberOfSessions = val;
-                                          _sessionAttendance.clear();
-                                        });
-                                      },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-
-                          // Attendance marking per session
-                          ...List.generate(_numberOfSessions, (index) {
-                            final sessionNum = index + 1;
-                            final status = _sessionAttendance[sessionNum];
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  Text("Class $sessionNum:"),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        ChoiceChip(
-                                          label: const Text('Present'),
-                                          selected:
-                                              status ==
-                                              AttendanceStatus.present,
-                                          onSelected: (selected) {
-                                            setState(() {
-                                              _sessionAttendance[sessionNum] =
-                                                  AttendanceStatus.present;
-                                            });
-                                          },
-                                        ),
-                                        ChoiceChip(
-                                          label: const Text('Absent'),
-                                          selected:
-                                              status == AttendanceStatus.absent,
-                                          onSelected: (selected) {
-                                            setState(() {
-                                              _sessionAttendance[sessionNum] =
-                                                  AttendanceStatus.absent;
-                                            });
-                                          },
-                                        ),
-                                        ChoiceChip(
-                                          label: const Text('Cancelled'),
-                                          selected:
-                                              status ==
-                                              AttendanceStatus.cancelled,
-                                          onSelected: (selected) {
-                                            setState(() {
-                                              _sessionAttendance[sessionNum] =
-                                                  AttendanceStatus.cancelled;
-                                            });
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }),
-
-                          const SizedBox(height: 16),
-
-                          // Save button
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: _isSavingAttendance
-                                  ? null
-                                  : () async {
-                                      if (_sessionAttendance.length <
-                                          _numberOfSessions) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Please select attendance for all classes',
-                                            ),
-                                          ),
-                                        );
-                                        return;
-                                      }
-
-                                      setState(() {
-                                        _isSavingAttendance = true;
-                                      });
-
-                                      final now = DateTime.now();
-                                      final dayOnly = DateTime(
-                                        now.year,
-                                        now.month,
-                                        now.day,
-                                      );
-
-                                      try {
-                                        // Fetch student doc to get assigned faculty
-                                        final studentDoc =
-                                            await FirebaseFirestore.instance
-                                                .collection('users')
-                                                .doc(uid)
-                                                .get();
-
-                                        final assignedFacultyMap =
-                                            studentDoc
-                                                .data()?['assignedFaculty'] ??
-                                            {};
-                                        final normalizedSubjectName = widget
-                                            .subject
-                                            .name
-                                            .trim()
-                                            .toLowerCase();
-                                        final assignedStaffId =
-                                            assignedFacultyMap[normalizedSubjectName];
-
-                                        // Iterate sessions
-                                        for (
-                                          int session = 1;
-                                          session <= _numberOfSessions;
-                                          session++
-                                        ) {
-                                          final status =
-                                              _sessionAttendance[session] ??
-                                              AttendanceStatus.absent;
-
-                                          final attendance = Attendance(
-                                            id: '',
-                                            subjectId: widget.subject.id,
-                                            date: dayOnly,
-                                            status: status,
-                                            sessionNumber: session,
-                                          );
-
-                                          if (assignedStaffId != null &&
-                                              assignedStaffId.isNotEmpty) {
-                                            // Send an attendance verification request to assigned faculty
-                                            await FirebaseFirestore.instance
-                                                .collection(
-                                                  'attendanceRequests',
-                                                )
-                                                .add({
-                                                  'studentId': uid,
-                                                  'studentName':
-                                                      studentDoc
-                                                          .data()?['name'] ??
-                                                      '',
-                                                  'staffId': assignedStaffId,
-                                                  'subjectId':
-                                                      widget.subject.id,
-                                                  'subjectName':
-                                                      widget.subject.name,
-                                                  'date': dayOnly,
-                                                  'sessionNumber': session,
-                                                  'attendanceStatus':
-                                                      status.name,
-                                                  'requestedAt':
-                                                      FieldValue.serverTimestamp(),
-                                                  'status': 'pending',
-                                                });
-                                          } else {
-                                            // No assigned faculty, mark attendance directly
-                                            await _firestoreService
-                                                .markAttendance(
-                                                  uid,
-                                                  widget.subject.name,
-                                                  attendance,
-                                                );
-                                          }
-                                        }
-
-                                        await _loadData();
-                                        if (!mounted) return;
-
-                                        // Show different message based on whether staff is assigned
-                                        final message =
-                                            (assignedStaffId != null &&
-                                                assignedStaffId.isNotEmpty)
-                                            ? 'Attendance submitted and pending verification.'
-                                            : 'Attendance updated.';
-
-                                        if (!context.mounted) return;
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          SnackBar(content: Text(message)),
-                                        );
-
-                                        setState(() {
-                                          _sessionAttendance.clear();
-                                          _numberOfSessions = 1;
-                                        });
-                                      } catch (e) {
-                                        if (!context.mounted) return;
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Failed to save attendance: $e',
-                                            ),
-                                          ),
-                                        );
-                                      } finally {
-                                        if (mounted) {
-                                          setState(() {
-                                            _isSavingAttendance = false;
-                                          });
-                                        }
-                                      }
-                                    },
-
-                              label: _isSavingAttendance
-                                  ? const SizedBox(
-                                      height: 18,
-                                      width: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Text('Save Attendance'),
-                              icon: _isSavingAttendance
-                                  ? const SizedBox.shrink()
-                                  : const Icon(Icons.save_rounded),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                ),
+                const Gap(AppSpacing.lg),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _stat(theme, colors, 'Total', stats.totalClasses),
+                      _stat(theme, colors, 'Present', stats.presentCount,
+                          color: colors.success),
+                      _stat(theme, colors, 'Absent', stats.absentCount,
+                          color: colors.danger),
+                    ],
                   ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
 
-                  const SizedBox(height: 16),
+  Widget _stat(ThemeData theme, AppColors colors, String label, int value,
+      {Color? color}) {
+    return Column(
+      children: [
+        Text('$value',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: color ?? colors.textPrimary,
+            )),
+        const Gap(2),
+        Text(label,
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: colors.textTertiary)),
+      ],
+    );
+  }
 
-                  // Quick Actions
-                  Card(
-                    elevation: 0,
-                    color: colorScheme.surfaceContainerLow,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Quick Actions',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+  Widget _buildTodayCard(ThemeData theme, AppColors colors) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("Today's attendance",
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colors.textPrimary,
+              )),
+          const Gap(AppSpacing.sm),
+          Row(
+            children: [
+              Text('Classes today',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: colors.textSecondary)),
+              const Spacer(),
+              DropdownButton<int>(
+                value: _numberOfSessions,
+                items: List.generate(8, (i) => i + 1)
+                    .map((n) =>
+                        DropdownMenuItem(value: n, child: Text('$n')))
+                    .toList(),
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() {
+                    _numberOfSessions = v;
+                    _sessionAttendance.clear();
+                  });
+                },
+              ),
+            ],
+          ),
+          const Gap(AppSpacing.xs),
+          ...List.generate(_numberOfSessions, (i) {
+            final session = i + 1;
+            final status = _sessionAttendance[session];
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 64,
+                    child: Text('Class $session',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: colors.textSecondary)),
+                  ),
+                  Expanded(
+                    child: Wrap(
+                      spacing: AppSpacing.xs,
+                      children: [
+                        for (final st in AttendanceStatus.values)
+                          ChoiceChip(
+                            label: Text(_statusLabel(st)),
+                            selected: status == st,
+                            onSelected: (_) => setState(
+                                () => _sessionAttendance[session] = st),
                           ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => AttendanceScreen(
-                                      subject: widget.subject,
-                                    ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.calendar_month_rounded),
-                              label: const Text('View Attendance History'),
-                            ),
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
                 ],
               ),
+            );
+          }),
+          const Gap(AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _isSavingAttendance ? null : _saveAttendance,
+                  icon: _isSavingAttendance
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_outlined, size: 18),
+                  label: const Text('Save'),
+                ),
+              ),
+              const Gap(AppSpacing.sm),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        StudentMarkPastAttendanceScreen(subject: widget.subject),
+                  ),
+                ),
+                icon: const Icon(Icons.edit_calendar_outlined, size: 18),
+                label: const Text('Past'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContentRows(ThemeData theme, AppColors colors) {
+    return StreamBuilder<List<DayPlan>>(
+      stream: _firestoreService.streamDayPlans(_contentOwnerId, _contentSubjectId),
+      builder: (context, daySnap) {
+        final plans = daySnap.data ?? [];
+        final notePlans = plans.where((p) => p.notes.isNotEmpty).toList();
+        return StreamBuilder<List<SubjectSection>>(
+          stream: _firestoreService.streamSections(
+              _contentOwnerId, _contentSubjectId),
+          builder: (context, secSnap) {
+            final sections = secSnap.data ?? [];
+            return Column(
+              children: [
+                _CollapsibleRow(
+                  title: 'Day-wise',
+                  subtitle: '${plans.length} ${plans.length == 1 ? 'day' : 'days'}',
+                  icon: Icons.view_day_outlined,
+                  child: plans.isEmpty
+                      ? _emptyRow(theme, colors, 'No days added yet')
+                      : Column(
+                          children: plans
+                              .map((p) => _dayLine(theme, colors, p,
+                                  showNotes: false))
+                              .toList(),
+                        ),
+                ),
+                const Gap(AppSpacing.xs),
+                _CollapsibleRow(
+                  title: 'Notes',
+                  subtitle:
+                      '${notePlans.length} ${notePlans.length == 1 ? 'note' : 'notes'}',
+                  icon: Icons.sticky_note_2_outlined,
+                  child: notePlans.isEmpty
+                      ? _emptyRow(theme, colors, 'No notes yet')
+                      : Column(
+                          children: notePlans
+                              .map((p) =>
+                                  _dayLine(theme, colors, p, showNotes: true))
+                              .toList(),
+                        ),
+                ),
+                for (final s in sections) ...[
+                  const Gap(AppSpacing.xs),
+                  _CollapsibleRow(
+                    title: s.title,
+                    icon: Icons.view_agenda_outlined,
+                    child: s.content.isEmpty
+                        ? _emptyRow(theme, colors, 'No content')
+                        : Padding(
+                            padding: const EdgeInsets.only(top: AppSpacing.xs),
+                            child: Text(s.content,
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(color: colors.textSecondary)),
+                          ),
+                  ),
+                ],
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _dayLine(ThemeData theme, AppColors colors, DayPlan p,
+      {required bool showNotes}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(DateFormat('EEE, d MMM yyyy').format(p.date),
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(color: colors.textTertiary)),
+          const Gap(2),
+          Text(showNotes ? p.notes : (p.topic.isEmpty ? '—' : p.topic),
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: colors.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyRow(ThemeData theme, AppColors colors, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Text(text,
+          style:
+              theme.textTheme.bodySmall?.copyWith(color: colors.textTertiary)),
+    );
+  }
+
+  String _statusLabel(AttendanceStatus s) {
+    switch (s) {
+      case AttendanceStatus.present:
+        return 'Present';
+      case AttendanceStatus.absent:
+        return 'Absent';
+      case AttendanceStatus.cancelled:
+        return 'Cancelled';
+    }
+  }
+}
+
+/// A bordered, animated collapsible row used for the student content section.
+class _CollapsibleRow extends StatefulWidget {
+  const _CollapsibleRow({
+    required this.title,
+    required this.icon,
+    required this.child,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final IconData icon;
+  final Widget child;
+
+  @override
+  State<_CollapsibleRow> createState() => _CollapsibleRowState();
+}
+
+class _CollapsibleRowState extends State<_CollapsibleRow> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Row(
+                children: [
+                  Icon(widget.icon, size: 18, color: colors.textSecondary),
+                  const Gap(AppSpacing.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.title,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: colors.textPrimary,
+                            )),
+                        if (widget.subtitle != null)
+                          Text(widget.subtitle!,
+                              style: theme.textTheme.labelSmall
+                                  ?.copyWith(color: colors.textTertiary)),
+                      ],
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: _open ? 0.5 : 0,
+                    duration: AppDuration.fast,
+                    child: Icon(Icons.expand_more,
+                        size: 20, color: colors.textTertiary),
+                  ),
+                ],
+              ),
             ),
+          ),
+          AnimatedCrossFade(
+            firstChild: const SizedBox(width: double.infinity),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
+              child: widget.child,
+            ),
+            crossFadeState:
+                _open ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: AppDuration.base,
+          ),
+        ],
+      ),
     );
   }
 }
