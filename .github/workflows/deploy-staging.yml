@@ -87,8 +87,13 @@ jobs:
       - name: Build web
         run: flutter build web --release
 
-      - name: Deploy hosting + rules (staging)
+      - name: Deploy to Firebase Hosting (staging)
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
-          firebase deploy --only hosting,firestore:rules,storage --project "${{ vars.FIREBASE_STAGING_PROJECT_ID }}"
+          firebase deploy --only hosting --project "${{ vars.FIREBASE_STAGING_PROJECT_ID }}"
+
+      # Firestore/Storage rules are NOT deployed here: the CI service account
+      # lacks serviceusage/rules permissions. Publish rules via the Firebase
+      # console or grant the service account the "Firebase Admin" role and add
+      # `,firestore:rules` above.
