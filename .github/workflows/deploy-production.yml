@@ -81,8 +81,8 @@ jobs:
       - name: Build web
         run: flutter build web --release
 
-      - name: Deploy to Firebase Hosting (production)
+      - name: Deploy hosting + rules (production)
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
-          firebase deploy --only hosting --project "${{ vars.FIREBASE_PROD_PROJECT_ID }}"
+          firebase deploy --only hosting,firestore:rules,storage --project "${{ vars.FIREBASE_PROD_PROJECT_ID }}"
