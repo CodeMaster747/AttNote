@@ -86,7 +86,6 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final colors = AppColors.of(context);
 
     return Scaffold(
@@ -108,21 +107,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Center(
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: colorScheme.primary,
-                              borderRadius: BorderRadius.circular(AppRadius.md),
-                            ),
-                            child: Icon(
-                              Icons.person_add_alt_1_outlined,
-                              size: 22,
-                              color: colorScheme.onPrimary,
-                            ),
-                          ),
-                        ),
+                        const Center(child: AppLogo(size: 72)),
                         const Gap(AppSpacing.md),
                         Text(
                           'Create your account',
@@ -289,13 +274,10 @@ class _SignupScreenState extends State<SignupScreen> {
                         ),
 
                         const Gap(AppSpacing.lg),
-                        SizedBox(
-                          height: 44,
-                          child: AppPrimaryButton(
-                            label: 'Create account',
-                            onPressed: _isLoading ? null : _signup,
-                            isLoading: _isLoading,
-                          ),
+                        AppPrimaryButton(
+                          label: 'Create account',
+                          onPressed: _isLoading ? null : _signup,
+                          isLoading: _isLoading,
                         ),
 
                         const Gap(AppSpacing.lg),

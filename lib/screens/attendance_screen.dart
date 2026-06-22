@@ -34,7 +34,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     try {
       final attendance = await _firestoreService.getAttendance(
         uid,
-        widget.subject.name,
+        widget.subject.id,
       );
       if (!mounted) return;
       setState(() {

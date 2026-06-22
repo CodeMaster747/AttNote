@@ -428,10 +428,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             '${((_analytics!.totalPresent / total) * 100).toStringAsFixed(1)}%',
                         color: colorScheme.tertiary,
                         radius: 80,
-                        titleStyle: const TextStyle(
+                        titleStyle: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: colorScheme.onTertiary,
                         ),
                       ),
                       PieChartSectionData(
@@ -440,10 +440,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             '${((_analytics!.totalAbsent / total) * 100).toStringAsFixed(1)}%',
                         color: colorScheme.error,
                         radius: 80,
-                        titleStyle: const TextStyle(
+                        titleStyle: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: colorScheme.onError,
                         ),
                       ),
                       if (_analytics!.totalCancelled > 0)
@@ -453,10 +453,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                               '${((_analytics!.totalCancelled / total) * 100).toStringAsFixed(1)}%',
                           color: colorScheme.secondary,
                           radius: 80,
-                          titleStyle: const TextStyle(
+                          titleStyle: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: colorScheme.onSecondary,
                           ),
                         ),
                     ],

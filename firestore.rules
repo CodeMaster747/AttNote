@@ -9,88 +9,83 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    function requesterRole() {
-      return get(
-        /databases/$(database)/documents/users/$(request.auth.uid)
-      ).data.role;
-    }
-
     function isStaff() {
-      return isSignedIn() && requesterRole() == "staff";
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
     }
 
-    // User profiles
+    // Data of a subject document at users/{ownerUid}/subjects/{subjectId}.
+    function subjectData(ownerUid, subjectId) {
+      return get(
+        /databases/$(database)/documents/users/$(ownerUid)/subjects/$(subjectId)
+      ).data;
+    }
+
+    // True if the signed-in user is enrolled in the given subject.
+    function isEnrolled(ownerUid, subjectId) {
+      let data = subjectData(ownerUid, subjectId);
+      return isSignedIn() &&
+        data.studentIds is list &&
+        request.auth.uid in data.studentIds;
+    }
+
+    // ---- User profiles ----
+    // Owners manage their own profile. Staff may read any profile so they can
+    // look up students by email (add-by-email) and show the roster.
     match /users/{uid} {
-      allow read, create: if isOwner(uid);
-      allow update: if isOwner(uid);
+      allow read: if isOwner(uid) || isStaff();
+      allow create, update: if isOwner(uid);
       allow delete: if false;
     }
 
-    // Personal subject collections
+    // ---- Subjects ----
+    // Owner: full control over subjects in their own collection.
+    // Enrolled student: may READ the staff's source subject document.
+    // Staff: may create/read/update/delete a student's mirrored copy that
+    //        links back to them (linkedStaffId == staff uid).
     match /users/{uid}/subjects/{subjectId} {
-      allow read, create, update, delete: if isOwner(uid);
+      allow read: if isOwner(uid)
+        || (isSignedIn() && resource.data.studentIds is list
+            && request.auth.uid in resource.data.studentIds)
+        || (isSignedIn() && resource.data.linkedStaffId == request.auth.uid);
+      allow create: if isOwner(uid)
+        || (isStaff() && request.resource.data.linkedStaffId == request.auth.uid);
+      allow update: if isOwner(uid)
+        || (isStaff() && resource.data.linkedStaffId == request.auth.uid);
+      allow delete: if isOwner(uid)
+        || (isStaff() && resource.data.linkedStaffId == request.auth.uid);
     }
 
+    // ---- Attendance ----
+    // Owner (student) full access; the linked staff may read/write it too
+    // (record attendance for the roster, read absences for the Course Guide).
     match /users/{uid}/subjects/{subjectId}/attendance/{attendanceId} {
-      allow read, create, update, delete: if isOwner(uid);
+      allow read, write: if isOwner(uid)
+        || (isSignedIn()
+            && subjectData(uid, subjectId).linkedStaffId == request.auth.uid);
     }
 
-    // Staff-managed classes and nested data
-    match /users/{uid}/classes/{classId} {
-      allow read, create, update, delete: if isOwner(uid) && isStaff();
+    // ---- Staff course content (read-only for enrolled students) ----
+    match /users/{uid}/subjects/{subjectId}/dayPlans/{docId} {
+      allow read: if isOwner(uid) || isEnrolled(uid, subjectId);
+      allow write: if isOwner(uid);
+    }
+    match /users/{uid}/subjects/{subjectId}/sections/{docId} {
+      allow read: if isOwner(uid) || isEnrolled(uid, subjectId);
+      allow write: if isOwner(uid);
+    }
+    match /users/{uid}/subjects/{subjectId}/tests/{docId} {
+      allow read: if isOwner(uid) || isEnrolled(uid, subjectId);
+      allow write: if isOwner(uid);
+    }
+    match /users/{uid}/subjects/{subjectId}/guide/{docId} {
+      allow read: if isOwner(uid) || isEnrolled(uid, subjectId);
+      allow write: if isOwner(uid);
     }
 
-    match /users/{uid}/classes/{classId}/students/{studentId} {
-      allow read, create, update, delete: if isOwner(uid) && isStaff();
-    }
-
-    match /users/{uid}/classes/{classId}/schedules/{scheduleId} {
-      allow read, create, update, delete: if isOwner(uid) && isStaff();
-    }
-
-    // Staff global subjects directory (search/join flow)
-    match /subjects/{subjectId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isStaff();
-    }
-
-    // Join requests: students create; owner staff reads/updates.
-    match /joinRequests/{requestId} {
-      allow create: if isSignedIn() &&
-        request.resource.data.studentId == request.auth.uid;
-
-      allow read: if isSignedIn() && (
-        resource.data.studentId == request.auth.uid ||
-        resource.data.ownerId == request.auth.uid
-      );
-
-      allow update: if isSignedIn() &&
-        resource.data.ownerId == request.auth.uid;
-
-      allow delete: if false;
-    }
-
-    // Attendance verification requests
-    match /attendanceRequests/{requestId} {
-      allow create: if isSignedIn() &&
-        request.resource.data.studentId == request.auth.uid;
-
-      allow read: if isSignedIn() && (
-        resource.data.studentId == request.auth.uid ||
-        resource.data.staffId == request.auth.uid
-      );
-
-      allow update: if isSignedIn() &&
-        resource.data.staffId == request.auth.uid;
-
-      allow delete: if false;
-    }
-
-    // Lock down everything else
+    // Lock down everything else.
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
-// trigger rules workflow
-// trigger rules check
