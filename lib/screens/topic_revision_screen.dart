@@ -1,9 +1,14 @@
 // screens/topic_revision_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:gap/gap.dart';
 import '../models/attendance_model.dart';
+import '../models/subject_model.dart';
+import '../core/theme/app_spacing.dart';
+import '../core/theme/app_theme.dart';
+import '../core/widgets/widgets.dart';
 import '../services/analytics_service.dart';
+import '../services/firestore_service.dart';
 
 class TopicRevisionScreen extends StatefulWidget {
   const TopicRevisionScreen({super.key});
@@ -14,11 +19,11 @@ class TopicRevisionScreen extends StatefulWidget {
 
 class _TopicRevisionScreenState extends State<TopicRevisionScreen> {
   final AnalyticsService _analyticsService = AnalyticsService();
+  final FirestoreService _firestoreService = FirestoreService();
   final String staffId = FirebaseAuth.instance.currentUser!.uid;
 
-  List<ClassSubjectInfo> _classSubjects = [];
-  String? _selectedClassId;
-  String? _selectedSubjectName;
+  List<Subject> _subjects = [];
+  Subject? _selected;
   List<TopicRevisionSuggestion> _suggestions = [];
   bool _isLoading = false;
   bool _isLoadingSuggestions = false;
@@ -26,327 +31,217 @@ class _TopicRevisionScreenState extends State<TopicRevisionScreen> {
   @override
   void initState() {
     super.initState();
-    _loadClassSubjects();
+    _loadSubjects();
   }
 
-  Future<void> _loadClassSubjects() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+  Future<void> _loadSubjects() async {
+    setState(() => _isLoading = true);
     try {
-      final classesSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(staffId)
-          .collection('classes')
-          .get();
-
-      List<ClassSubjectInfo> classSubjects = [];
-      for (var doc in classesSnapshot.docs) {
-        final data = doc.data();
-        classSubjects.add(
-          ClassSubjectInfo(
-            classId: doc.id,
-            subjectName: data['subjectName'] ?? 'Unknown',
-            className: data['className'] ?? 'Unknown',
-            department: data['department'] ?? '',
-          ),
-        );
-      }
-
-      if (mounted) {
-        setState(() {
-          _classSubjects = classSubjects;
-          _isLoading = false;
-        });
-      }
+      final all = await _firestoreService.getSubjects(staffId);
+      final staffSubjects = all.where((s) => s.isStaffOwned).toList();
+      if (!mounted) return;
+      setState(() {
+        _subjects = staffSubjects;
+        _isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error loading classes: $e')));
-      }
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error loading subjects: $e')));
     }
   }
 
   Future<void> _loadSuggestions() async {
-    if (_selectedClassId == null || _selectedSubjectName == null) return;
-
-    setState(() {
-      _isLoadingSuggestions = true;
-    });
-
+    final selected = _selected;
+    if (selected == null) return;
+    setState(() => _isLoadingSuggestions = true);
     try {
       final suggestions = await _analyticsService.getTopicRevisionSuggestions(
-        staffId,
-        _selectedClassId!,
-        _selectedSubjectName!,
+        selected.studentIds,
+        selected.id,
+        selected.name,
       );
-
-      if (mounted) {
-        setState(() {
-          _suggestions = suggestions;
-          _isLoadingSuggestions = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _suggestions = suggestions;
+        _isLoadingSuggestions = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoadingSuggestions = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading suggestions: $e')),
-        );
-      }
+      if (!mounted) return;
+      setState(() => _isLoadingSuggestions = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error loading suggestions: $e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = AppColors.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Topic Revision Suggestions')),
+      backgroundColor: colors.background,
+      appBar: AppBar(title: const Text('Topic revision')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Padding(
-              padding: const EdgeInsets.all(16),
+              padding: AppSpacing.pagePadding,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Class/Subject Selector
-                  Text(
-                    'Select Class',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  SectionHeader(
+                    title: 'Select a subject',
+                    subtitle: 'Suggestions are ranked by absences across the roster',
                   ),
-                  const SizedBox(height: 8),
-                  Card(
-                    elevation: 0,
-                    color: colorScheme.surfaceContainerLow,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _selectedClassId,
-                        decoration: const InputDecoration(
-                          labelText: 'Class & Subject',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.class_rounded),
-                        ),
-                        items: _classSubjects
+                  const Gap(AppSpacing.sm),
+                  AppCard(
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<Subject>(
+                        isExpanded: true,
+                        value: _selected,
+                        hint: const Text('Choose a subject'),
+                        items: _subjects
                             .map(
-                              (cs) => DropdownMenuItem<String>(
-                                value: cs.classId,
+                              (s) => DropdownMenuItem<Subject>(
+                                value: s,
                                 child: Text(
-                                  '${cs.subjectName} - ${cs.className}',
+                                  s.section.isNotEmpty
+                                      ? '${s.name} · ${s.section}'
+                                      : s.name,
                                 ),
                               ),
                             )
                             .toList(),
                         onChanged: (value) {
                           setState(() {
-                            _selectedClassId = value;
-                            _selectedSubjectName = _classSubjects
-                                .firstWhere((cs) => cs.classId == value)
-                                .subjectName;
-                            _suggestions.clear();
+                            _selected = value;
+                            _suggestions = [];
                           });
                           _loadSuggestions();
                         },
                       ),
                     ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ML Suggestions
-                  if (_selectedClassId != null) ...[
-                    Row(
-                      children: [
-                        Text(
-                          'Revision Suggestions',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: colorScheme.primary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const Spacer(),
-                        if (_isLoadingSuggestions)
-                          const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Based on attendance patterns, these topics had the most absences:',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // Suggestions List
+                  const Gap(AppSpacing.lg),
                   Expanded(
-                    child: _isLoadingSuggestions
-                        ? const Center(child: CircularProgressIndicator())
-                        : _suggestions.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  _selectedClassId == null
-                                      ? Icons.touch_app_rounded
-                                      : Icons.lightbulb_outline_rounded,
-                                  size: 48,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  _selectedClassId == null
-                                      ? 'Select a class to view suggestions'
-                                      : 'No suggestions available.\nEnsure attendance data exists.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
+                    child: _selected == null
+                        ? const EmptyState(
+                            title: 'No subject selected',
+                            message: 'Pick a subject to see revision suggestions.',
+                            icon: Icons.touch_app_outlined,
                           )
-                        : ListView.builder(
-                            itemCount: _suggestions.length,
-                            itemBuilder: (context, index) {
-                              final suggestion = _suggestions[index];
-                              final rank = index + 1;
-
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                elevation: 0,
-                                color: colorScheme.surfaceContainerLow,
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: _getRankColor(rank),
-                                    child: Text(
-                                      '$rank',
-                                      style: TextStyle(
-                                        color: _getRankForegroundColor(rank),
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    suggestion.displayName,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${suggestion.absentCount} of ${suggestion.totalStudents} students absent',
-                                      ),
-                                      const SizedBox(height: 4),
-                                      LinearProgressIndicator(
-                                        value:
-                                            suggestion.absentPercentage / 100,
-                                        backgroundColor:
-                                            colorScheme.surfaceContainerHighest,
-                                        color: colorScheme.error,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${suggestion.absentPercentage.toStringAsFixed(1)}% absent',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: colorScheme.error,
+                        : _isLoadingSuggestions
+                            ? const Center(child: CircularProgressIndicator())
+                            : _suggestions.isEmpty
+                                ? const EmptyState(
+                                    title: 'No suggestions yet',
+                                    message:
+                                        'Add students and record attendance to generate suggestions.',
+                                    icon: Icons.lightbulb_outline,
+                                  )
+                                : ListView.separated(
+                                    itemCount: _suggestions.length,
+                                    separatorBuilder: (_, __) =>
+                                        const Gap(AppSpacing.sm),
+                                    itemBuilder: (context, index) {
+                                      final s = _suggestions[index];
+                                      return AppCard(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                _RankBadge(rank: index + 1),
+                                                const Gap(AppSpacing.sm),
+                                                Expanded(
+                                                  child: Text(
+                                                    s.displayName,
+                                                    style: theme
+                                                        .textTheme.titleSmall
+                                                        ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: colors.textPrimary,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                      ),
-                                    ],
-                                  ),
-                                  trailing: IconButton(
-                                    icon: const Icon(
-                                      Icons.check_circle_outline,
-                                    ),
-                                    tooltip: 'Mark as revised',
-                                    onPressed: () {
-                                      // Optional: Implement marking as revised
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Marked "${suggestion.displayName}" as revised',
-                                          ),
+                                            const Gap(AppSpacing.sm),
+                                            Text(
+                                              '${s.absentCount} of ${s.totalStudents} students absent',
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                color: colors.textSecondary,
+                                              ),
+                                            ),
+                                            const Gap(AppSpacing.xs),
+                                            ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      AppRadius.sm),
+                                              child: LinearProgressIndicator(
+                                                value: s.absentPercentage / 100,
+                                                minHeight: 6,
+                                                backgroundColor:
+                                                    colors.surfaceMuted,
+                                                valueColor:
+                                                    AlwaysStoppedAnimation(
+                                                        colors.danger),
+                                              ),
+                                            ),
+                                            const Gap(AppSpacing.xs),
+                                            Text(
+                                              '${s.absentPercentage.toStringAsFixed(0)}% absent',
+                                              style: theme.textTheme.labelSmall
+                                                  ?.copyWith(
+                                                color: colors.danger,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       );
                                     },
                                   ),
-                                ),
-                              );
-                            },
-                          ),
                   ),
                 ],
               ),
             ),
     );
   }
-
-  Color _getRankColor(int rank) {
-    final colorScheme = Theme.of(context).colorScheme;
-    switch (rank) {
-      case 1:
-        return colorScheme.error;
-      case 2:
-        return colorScheme.secondary;
-      case 3:
-        return colorScheme.tertiary;
-      default:
-        return colorScheme.surfaceContainerHighest;
-    }
-  }
-
-  Color _getRankForegroundColor(int rank) {
-    final colorScheme = Theme.of(context).colorScheme;
-    switch (rank) {
-      case 1:
-        return colorScheme.onError;
-      case 2:
-        return colorScheme.onSecondary;
-      case 3:
-        return colorScheme.onTertiary;
-      default:
-        return colorScheme.onSurface;
-    }
-  }
 }
 
-class ClassSubjectInfo {
-  final String classId;
-  final String subjectName;
-  final String className;
-  final String department;
+class _RankBadge extends StatelessWidget {
+  const _RankBadge({required this.rank});
+  final int rank;
 
-  ClassSubjectInfo({
-    required this.classId,
-    required this.subjectName,
-    required this.className,
-    required this.department,
-  });
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final theme = Theme.of(context);
+    final color = rank == 1
+        ? colors.danger
+        : rank == 2
+            ? colors.warning
+            : colors.textSecondary;
+    return Container(
+      width: 28,
+      height: 28,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        '$rank',
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
 }

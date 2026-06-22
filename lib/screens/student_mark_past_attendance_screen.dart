@@ -63,7 +63,7 @@ class _StudentMarkPastAttendanceScreenState
 
         await _firestoreService.markAttendanceForPastDate(
           uid,
-          widget.subject.name,
+          widget.subject.id,
           _selectedDate,
           session,
           status,

@@ -223,7 +223,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final colors = AppColors.of(context);
     final busy = _isLoading || _googleLoading;
 
@@ -246,21 +245,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Center(
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: colorScheme.primary,
-                              borderRadius: BorderRadius.circular(AppRadius.md),
-                            ),
-                            child: Icon(
-                              Icons.school_outlined,
-                              size: 22,
-                              color: colorScheme.onPrimary,
-                            ),
-                          ),
-                        ),
+                        const Center(child: AppLogo(size: 72)),
                         const Gap(AppSpacing.md),
                         Text(
                           'Welcome back',
@@ -354,35 +339,29 @@ class _LoginScreenState extends State<LoginScreen> {
 
                         const Gap(AppSpacing.md),
 
-                        SizedBox(
-                          height: 44,
-                          child: AppPrimaryButton(
-                            label: 'Sign in',
-                            onPressed: busy ? null : _login,
-                            isLoading: _isLoading,
-                          ),
+                        AppPrimaryButton(
+                          label: 'Sign in',
+                          onPressed: busy ? null : _login,
+                          isLoading: _isLoading,
                         ),
 
                         const Gap(AppSpacing.sm),
                         _Divider(label: 'or'),
                         const Gap(AppSpacing.sm),
 
-                        SizedBox(
-                          height: 44,
-                          child: OutlinedButton.icon(
-                            onPressed: busy ? null : _signInWithGoogle,
-                            icon: _googleLoading
-                                ? SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 1.6,
-                                      color: colors.textPrimary,
-                                    ),
-                                  )
-                                : const Icon(Icons.g_mobiledata_rounded, size: 20),
-                            label: const Text('Continue with Google'),
-                          ),
+                        OutlinedButton.icon(
+                          onPressed: busy ? null : _signInWithGoogle,
+                          icon: _googleLoading
+                              ? SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.6,
+                                    color: colors.textPrimary,
+                                  ),
+                                )
+                              : const Icon(Icons.g_mobiledata_rounded, size: 20),
+                          label: const Text('Continue with Google'),
                         ),
 
                         const Gap(AppSpacing.lg),

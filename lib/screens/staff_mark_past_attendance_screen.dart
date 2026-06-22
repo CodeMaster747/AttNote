@@ -1,20 +1,21 @@
 // screens/staff_mark_past_attendance_screen.dart
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:gap/gap.dart';
 import 'package:intl/intl.dart';
 import '../models/attendance_model.dart';
+import '../models/course_model.dart';
+import '../models/subject_model.dart';
+import '../core/theme/app_spacing.dart';
+import '../core/theme/app_theme.dart';
+import '../core/widgets/widgets.dart';
 import '../services/firestore_service.dart';
 
+/// Staff records attendance for every student on the subject's roster for a
+/// given date. The topic, if planned for that day, is attached automatically.
 class StaffMarkPastAttendanceScreen extends StatefulWidget {
-  final String classId;
-  final String subjectName;
+  final Subject subject;
 
-  const StaffMarkPastAttendanceScreen({
-    super.key,
-    required this.classId,
-    required this.subjectName,
-  });
+  const StaffMarkPastAttendanceScreen({super.key, required this.subject});
 
   @override
   State<StaffMarkPastAttendanceScreen> createState() =>
@@ -24,15 +25,15 @@ class StaffMarkPastAttendanceScreen extends StatefulWidget {
 class _StaffMarkPastAttendanceScreenState
     extends State<StaffMarkPastAttendanceScreen> {
   final FirestoreService _firestoreService = FirestoreService();
-  final String staffId = FirebaseAuth.instance.currentUser!.uid;
 
   DateTime _selectedDate = DateTime.now();
-  List<StudentInfo> _students = [];
-  Map<String, dynamic>? _schedule;
+  int _numberOfSessions = 1;
+  List<Map<String, dynamic>> _students = [];
+  String? _topicForDay;
   bool _isLoading = false;
   bool _isSaving = false;
 
-  // Map: studentId -> sessionNumber -> AttendanceStatus
+  // studentId -> sessionNumber -> status
   final Map<String, Map<int, AttendanceStatus>> _attendanceData = {};
 
   @override
@@ -42,157 +43,43 @@ class _StaffMarkPastAttendanceScreenState
   }
 
   Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
-      // Load students in this class
-      final classDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(staffId)
-          .collection('classes')
-          .doc(widget.classId)
-          .get();
-
-      final studentIds = List<String>.from(
-        classDoc.data()?['studentIds'] ?? [],
+      final students =
+          await _firestoreService.getRosterStudents(widget.subject.studentIds);
+      final plans = await _firestoreService.getDayPlans(
+        widget.subject.createdBy,
+        widget.subject.id,
       );
-
-      List<StudentInfo> students = [];
-      for (var studentId in studentIds) {
-        final studentDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(studentId)
-            .get();
-
-        if (studentDoc.exists) {
-          students.add(
-            StudentInfo(
-              id: studentId,
-              name: studentDoc.data()?['name'] ?? 'Unknown',
-            ),
-          );
-        }
-      }
-
-      // Load schedule for the selected date
-      final schedule = await _firestoreService.getSessionSchedule(
-        staffId,
-        widget.classId,
-        _selectedDate,
-      );
-
-      if (mounted) {
-        setState(() {
-          _students = students;
-          _schedule = schedule;
-          _isLoading = false;
-        });
-      }
+      final key = DayPlan.dateKey(_selectedDate);
+      final match = plans.where((p) => p.id == key);
+      if (!mounted) return;
+      setState(() {
+        _students = students;
+        _topicForDay = match.isNotEmpty ? match.first.topic : null;
+        _isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error loading data: $e')));
-      }
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error loading data: $e')));
     }
   }
 
   Future<void> _selectDate() async {
-    final DateTime? picked = await showDatePicker(
+    final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
-
     if (picked != null && picked != _selectedDate) {
       setState(() {
         _selectedDate = picked;
         _attendanceData.clear();
       });
       await _loadData();
-    }
-  }
-
-  Future<void> _saveAttendance() async {
-    if (_schedule == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No schedule found for this date. Please create a schedule first.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    final numberOfSessions = _schedule!['numberOfSessions'] as int? ?? 0;
-
-    // Validate that attendance is marked for all students and sessions
-    for (var student in _students) {
-      for (int session = 1; session <= numberOfSessions; session++) {
-        if (_attendanceData[student.id]?[session] == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Please mark attendance for ${student.name} - Session $session',
-              ),
-            ),
-          );
-          return;
-        }
-      }
-    }
-
-    setState(() {
-      _isSaving = true;
-    });
-
-    try {
-      final topicsData =
-          _schedule!['sessionTopics'] as Map<dynamic, dynamic>? ?? {};
-
-      for (var student in _students) {
-        for (int session = 1; session <= numberOfSessions; session++) {
-          final status = _attendanceData[student.id]![session]!;
-          final topic = topicsData[session.toString()]?.toString();
-
-          await _firestoreService.markAttendanceForPastDate(
-            student.id,
-            widget.subjectName,
-            _selectedDate,
-            session,
-            status,
-            topic,
-          );
-        }
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Attendance saved successfully')),
-        );
-        setState(() {
-          _attendanceData.clear();
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error saving attendance: $e')));
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
     }
   }
 
@@ -203,207 +90,215 @@ class _StaffMarkPastAttendanceScreenState
     });
   }
 
+  Future<void> _saveAttendance() async {
+    for (final student in _students) {
+      final id = student['id'] as String;
+      for (int session = 1; session <= _numberOfSessions; session++) {
+        if (_attendanceData[id]?[session] == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Mark attendance for ${student['name'] ?? id} · Session $session',
+              ),
+            ),
+          );
+          return;
+        }
+      }
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      for (final student in _students) {
+        final id = student['id'] as String;
+        for (int session = 1; session <= _numberOfSessions; session++) {
+          await _firestoreService.markAttendanceForPastDate(
+            id,
+            widget.subject.id,
+            _selectedDate,
+            session,
+            _attendanceData[id]![session]!,
+            _topicForDay,
+          );
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Attendance saved')),
+      );
+      setState(() => _attendanceData.clear());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error saving attendance: $e')));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final numberOfSessions = _schedule?['numberOfSessions'] as int? ?? 0;
-    final topicsData =
-        _schedule?['sessionTopics'] as Map<dynamic, dynamic>? ?? {};
+    final theme = Theme.of(context);
+    final colors = AppColors.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: Text('Mark Attendance — ${widget.subjectName}')),
+      backgroundColor: colors.background,
+      appBar: AppBar(title: Text('Record attendance · ${widget.subject.name}')),
       body: Column(
         children: [
-          // Date Selector
-          Card(
-            elevation: 0,
-            color: colorScheme.surfaceContainerLow,
-            margin: const EdgeInsets.all(16),
-            child: ListTile(
-              leading: Icon(
-                Icons.calendar_today_rounded,
-                color: colorScheme.primary,
-              ),
-              title: const Text('Select Date'),
-              subtitle: Text(
-                DateFormat('EEEE, MMMM d, yyyy').format(_selectedDate),
-              ),
-              trailing: Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              onTap: _selectDate,
-            ),
-          ),
-
-          if (_isLoading)
-            const Expanded(child: Center(child: CircularProgressIndicator()))
-          else if (_schedule == null)
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+          Padding(
+            padding: AppSpacing.pagePadding,
+            child: Column(
+              children: [
+                AppCard(
+                  onTap: _selectDate,
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today_outlined,
+                          size: 18, color: colors.textSecondary),
+                      const Gap(AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Date',
+                                style: theme.textTheme.labelSmall
+                                    ?.copyWith(color: colors.textTertiary)),
+                            Text(
+                              DateFormat('EEEE, MMMM d, yyyy')
+                                  .format(_selectedDate),
+                              style: theme.textTheme.bodyMedium
+                                  ?.copyWith(color: colors.textPrimary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.edit_outlined,
+                          size: 16, color: colors.textTertiary),
+                    ],
+                  ),
+                ),
+                const Gap(AppSpacing.sm),
+                Row(
                   children: [
-                    Icon(
-                      Icons.event_busy_rounded,
-                      size: 56,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No schedule found for this date',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
+                    Expanded(
+                      child: Text(
+                        _topicForDay != null && _topicForDay!.isNotEmpty
+                            ? 'Topic: $_topicForDay'
+                            : 'No topic planned for this day',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: colors.textSecondary),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Please create a schedule first',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+                    const Gap(AppSpacing.sm),
+                    Text('Sessions',
+                        style: theme.textTheme.labelMedium
+                            ?.copyWith(color: colors.textSecondary)),
+                    const Gap(AppSpacing.xs),
+                    DropdownButton<int>(
+                      value: _numberOfSessions,
+                      items: List.generate(6, (i) => i + 1)
+                          .map((n) =>
+                              DropdownMenuItem(value: n, child: Text('$n')))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setState(() {
+                          _numberOfSessions = v;
+                          _attendanceData.clear();
+                        });
+                      },
                     ),
                   ],
                 ),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.builder(
-                itemCount: _students.length,
-                itemBuilder: (context, index) {
-                  final student = _students[index];
-                  return Card(
-                    elevation: 0,
-                    color: colorScheme.surfaceContainerLow,
-                    margin: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 6,
-                    ),
-                    child: ExpansionTile(
-                      leading: CircleAvatar(
-                        backgroundColor: colorScheme.primaryContainer,
-                        child: Text(
-                          student.name.isNotEmpty
-                              ? student.name[0].toUpperCase()
-                              : '?',
-                          style: TextStyle(
-                            color: colorScheme.onPrimaryContainer,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      title: Text(
-                        student.name,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      children: List.generate(numberOfSessions, (sessionIndex) {
-                        final session = sessionIndex + 1;
-                        final topic =
-                            topicsData[session.toString()]?.toString() ??
-                            'No topic';
-                        final currentStatus =
-                            _attendanceData[student.id]?[session];
-
-                        return Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Session $session: $topic',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                children: [
-                                  ChoiceChip(
-                                    label: const Text('Present'),
-                                    selected:
-                                        currentStatus ==
-                                        AttendanceStatus.present,
-                                    selectedColor:
-                                        colorScheme.tertiaryContainer,
-                                    onSelected: (selected) {
-                                      if (selected) {
-                                        _setAttendance(
-                                          student.id,
-                                          session,
-                                          AttendanceStatus.present,
-                                        );
-                                      }
-                                    },
-                                  ),
-                                  ChoiceChip(
-                                    label: const Text('Absent'),
-                                    selected:
-                                        currentStatus ==
-                                        AttendanceStatus.absent,
-                                    selectedColor: colorScheme.errorContainer,
-                                    onSelected: (selected) {
-                                      if (selected) {
-                                        _setAttendance(
-                                          student.id,
-                                          session,
-                                          AttendanceStatus.absent,
-                                        );
-                                      }
-                                    },
-                                  ),
-                                  ChoiceChip(
-                                    label: const Text('Cancelled'),
-                                    selected:
-                                        currentStatus ==
-                                        AttendanceStatus.cancelled,
-                                    selectedColor:
-                                        colorScheme.secondaryContainer,
-                                    onSelected: (selected) {
-                                      if (selected) {
-                                        _setAttendance(
-                                          student.id,
-                                          session,
-                                          AttendanceStatus.cancelled,
-                                        );
-                                      }
-                                    },
-                                  ),
-                                ],
-                              ),
-                              if (sessionIndex < numberOfSessions - 1)
-                                const Divider(),
-                            ],
-                          ),
-                        );
-                      }),
-                    ),
-                  );
-                },
-              ),
+              ],
             ),
-
-          // Save Button
-          if (_schedule != null && _students.isNotEmpty)
+          ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _students.isEmpty
+                    ? const EmptyState(
+                        title: 'No students on the roster',
+                        message: 'Add students by email to record attendance.',
+                        icon: Icons.people_outline,
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
+                        itemCount: _students.length,
+                        separatorBuilder: (_, __) => const Gap(AppSpacing.xs),
+                        itemBuilder: (context, index) {
+                          final student = _students[index];
+                          final id = student['id'] as String;
+                          final name = (student['name'] ?? id).toString();
+                          return AppCard(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.textPrimary,
+                                    )),
+                                const Gap(AppSpacing.sm),
+                                ...List.generate(_numberOfSessions, (s) {
+                                  final session = s + 1;
+                                  final current = _attendanceData[id]?[session];
+                                  return Padding(
+                                    padding:
+                                        const EdgeInsets.only(bottom: AppSpacing.xs),
+                                    child: Row(
+                                      children: [
+                                        SizedBox(
+                                          width: 64,
+                                          child: Text('S$session',
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                      color:
+                                                          colors.textSecondary)),
+                                        ),
+                                        Expanded(
+                                          child: Wrap(
+                                            spacing: AppSpacing.xs,
+                                            children: [
+                                              for (final st
+                                                  in AttendanceStatus.values)
+                                                ChoiceChip(
+                                                  label: Text(_label(st)),
+                                                  selected: current == st,
+                                                  onSelected: (_) =>
+                                                      _setAttendance(
+                                                          id, session, st),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+          ),
+          if (_students.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: AppSpacing.pagePadding,
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: _isSaving ? null : _saveAttendance,
                   icon: _isSaving
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: colorScheme.onPrimary,
-                          ),
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.save),
-                  label: Text(_isSaving ? 'Saving...' : 'Save Attendance'),
+                      : const Icon(Icons.save_outlined),
+                  label: Text(_isSaving ? 'Saving…' : 'Save attendance'),
                 ),
               ),
             ),
@@ -411,11 +306,15 @@ class _StaffMarkPastAttendanceScreenState
       ),
     );
   }
-}
 
-class StudentInfo {
-  final String id;
-  final String name;
-
-  StudentInfo({required this.id, required this.name});
+  String _label(AttendanceStatus s) {
+    switch (s) {
+      case AttendanceStatus.present:
+        return 'Present';
+      case AttendanceStatus.absent:
+        return 'Absent';
+      case AttendanceStatus.cancelled:
+        return 'Cancelled';
+    }
+  }
 }

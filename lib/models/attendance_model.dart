@@ -57,54 +57,6 @@ class AttendanceStats {
            : 0.0;
 }
 
-// Model for staff session scheduling
-class SessionSchedule {
-  final String id;
-  final String staffId;
-  final String classId;
-  final String subjectName;
-  final DateTime date;
-  final int numberOfSessions;
-  final Map<int, String> sessionTopics; // sessionNumber -> topic
-
-  SessionSchedule({
-    required this.id,
-    required this.staffId,
-    required this.classId,
-    required this.subjectName,
-    required this.date,
-    required this.numberOfSessions,
-    required this.sessionTopics,
-  });
-
-  Map<String, dynamic> toMap() => {
-    'staffId': staffId,
-    'classId': classId,
-    'subjectName': subjectName,
-    'date': date,
-    'numberOfSessions': numberOfSessions,
-    'sessionTopics': sessionTopics,
-  };
-
-  factory SessionSchedule.fromMap(Map<String, dynamic> data, String id) {
-    final topicsData = data['sessionTopics'] as Map<dynamic, dynamic>? ?? {};
-    final sessionTopics = <int, String>{};
-    topicsData.forEach((key, value) {
-      sessionTopics[int.parse(key.toString())] = value.toString();
-    });
-
-    return SessionSchedule(
-      id: id,
-      staffId: data['staffId'] ?? '',
-      classId: data['classId'] ?? '',
-      subjectName: data['subjectName'] ?? '',
-      date: data['date']?.toDate() ?? DateTime.now(),
-      numberOfSessions: data['numberOfSessions'] ?? 1,
-      sessionTopics: sessionTopics,
-    );
-  }
-}
-
 // Model for ML-based topic revision suggestions
 class TopicRevisionSuggestion {
   final String topic;

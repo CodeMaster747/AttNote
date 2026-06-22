@@ -86,16 +86,16 @@ class _LandingScreenState extends State<LandingScreen> {
                 ),
                 const SliverToBoxAdapter(
                   child: _FeatureSection(
-                    eyebrow: 'Notes',
+                    eyebrow: 'Course content',
                     title: 'Share notes where they belong.',
                     description:
-                        'Attach lecture notes, recordings, and revision topics '
-                        'directly to the subjects your class already follows. '
-                        'No more scattered group chats.',
+                        'Staff plan each teaching day with a topic and notes, and '
+                        'add students by email — no join requests. Students open '
+                        'the subject and find everything in clean, collapsible rows.',
                     bullets: [
-                      'Notes attached to subjects, not lost in chat',
-                      'Audio recordings with instant transcription',
-                      'Topic-based revision lists for exam prep',
+                      'Per-day topics and notes attached to each subject',
+                      'Collapsible day-wise, notes, and custom content rows',
+                      'Add students by email — staff stay in control',
                     ],
                     icon: Icons.menu_book_outlined,
                     imageLeft: true,
@@ -153,7 +153,7 @@ class _TopBar extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const _LogoMark(size: 28),
+              const AppLogo(size: 36),
               const Gap(AppSpacing.sm),
               Text(
                 'AttNote',
@@ -310,30 +310,6 @@ class _Pill extends StatelessWidget {
   }
 }
 
-class _LogoMark extends StatelessWidget {
-  const _LogoMark({this.size = 32});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        color: colorScheme.primary,
-      ),
-      child: Icon(
-        Icons.school_outlined,
-        size: size * 0.55,
-        color: colorScheme.onPrimary,
-      ),
-    );
-  }
-}
-
 // ----------------------------------------------------------------------------
 // Hero visual — calm mock of the product surface.
 // ----------------------------------------------------------------------------
@@ -364,7 +340,7 @@ class _HeroVisual extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const _LogoMark(size: 22),
+                      const AppLogo(size: 28),
                       const Gap(AppSpacing.xs),
                       Text(
                         'Today',
@@ -1015,7 +991,7 @@ class _Footer extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const _LogoMark(size: 26),
+                    const AppLogo(size: 32),
                     const Gap(AppSpacing.sm),
                     Text(
                       'AttNote',
